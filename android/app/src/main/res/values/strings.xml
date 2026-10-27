@@ -5,6 +5,11 @@
     <string name="welcome">欢迎使用</string>
     <string name="baseline_message">应用已启动。语音文本同步与剪切板功能将在后续版本提供。</string>
 
+    <string name="input_title">语音输入</string>
+    <string name="input_clear">清空</string>
+    <string name="input_hint">在此使用输入法的语音输入</string>
+    <string name="input_ime_note">录音与识别由你当前使用的输入法完成；VoiceBridge 不录音、不识别、也不点击输入法麦克风。</string>
+
     <string name="pairing_title">配对电脑</string>
     <string name="pairing_searching">正在搜索局域网内的电脑…</string>
     <string name="pairing_empty">未发现电脑。请确认电脑端的 VoiceBridge 已启动，然后重试。</string>

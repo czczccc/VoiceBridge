@@ -249,9 +249,25 @@
 - 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
 - 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
+## TASK-004 实施与验证记录（Android 输入法文本框）
+
+状态：代码完成，**待 CI 验证**；真机输入法行为待用户测试。
+
+已实现：
+- `InputViewModel`：以 `TextFieldValue` 为唯一文本状态源，选择区与 composition 随状态一起保留；文本或选区变化时 `revision` 递增，供 TASK-005 生成快照。
+- `InputScreen`：多行 `OutlinedTextField`，进入页面后请求焦点并调用 `LocalSoftwareKeyboardController.show()`；系统拒绝时仍可手动点按输入框；提供「清空」。
+- 明文声明不录音、不调用 ASR、不点击第三方输入法麦克风（界面文案与代码注释）。
+- Manifest 增加 `windowSoftInputMode="adjustResize"`，并在根布局加 `imePadding()`，避免键盘遮挡输入框（行为待真机确认）。
+- 顺带修正配对页两处显示问题：已配对时不再重复出现第二行「已配对」；未配对且列表为空时才提示「未发现电脑」。
+
+未验证 / 风险：
+- 未编译、未运行；CI 结果未知。
+- 未真机验证微信/百度/搜狗/豆包输入法的语音输入是否进入文本框、是否提供 composition、键盘是否自动弹出。
+- 输入文本尚未发送到 Windows（TASK-005 及之后）。
+
 ## TASK-003c-2 实施与验证记录（mDNS 发现与 Android 配对界面）
 
-状态：Windows 的 mDNS 广播已由 CI 40475901092 验证；Android 客户端代码完成，**待下一次 CI 验证**。
+状态：Windows mDNS 与 Android 客户端均通过 CI 40478283353（Rust 42 项、Android 35 项，发布 test.25）；**真机配对已成功**：用户 2026-10-27 提供截图，手机显示「已配对：JAY-DESKTOP」。负向场景（撤销、错误指纹、过期）仍只有单元测试，未真机验证。
 
 已实现：
 - Windows：`discovery.rs` 在开启局域网访问时注册 `_voicebridge._tcp.local.`，TXT 为 `v/id/name/fp`，停止或关闭局域网时注销；mDNS 失败只记日志，不阻断服务。

@@ -68,8 +68,9 @@ fun PairingScreen(viewModel: PairingViewModel = viewModel()) {
                 }
             }
         }
-        StatusBlock(state)
-        if (computers.isEmpty()) {
+        // The stored row already says "已配对"; a second identical line only confuses.
+        StatusBlock(state, showPaired = stored == null)
+        if (computers.isEmpty() && stored == null) {
             Text(text = stringResource(R.string.pairing_empty), style = MaterialTheme.typography.bodyMedium)
         } else {
             Text(text = stringResource(R.string.pairing_tap_to_pair), style = MaterialTheme.typography.bodySmall)
@@ -94,7 +95,7 @@ fun PairingScreen(viewModel: PairingViewModel = viewModel()) {
 }
 
 @Composable
-private fun StatusBlock(state: PairingUiState) {
+private fun StatusBlock(state: PairingUiState, showPaired: Boolean) {
     when (state) {
         PairingUiState.Idle -> Text(
             text = stringResource(R.string.pairing_searching),
@@ -117,10 +118,12 @@ private fun StatusBlock(state: PairingUiState) {
                 style = MaterialTheme.typography.headlineSmall,
             )
         }
-        is PairingUiState.Paired -> Text(
-            text = stringResource(R.string.pairing_paired, state.name),
-            color = MaterialTheme.colorScheme.primary,
-        )
+        is PairingUiState.Paired -> if (showPaired) {
+            Text(
+                text = stringResource(R.string.pairing_paired, state.name),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         is PairingUiState.Error -> Text(
             text = state.message,
             color = MaterialTheme.colorScheme.error,
