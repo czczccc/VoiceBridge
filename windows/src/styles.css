@@ -42,3 +42,79 @@ h2 {
   margin-top: 0;
   font-size: 20px;
 }
+
+.state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9aa7ac;
+}
+
+.state[data-running="true"] .dot {
+  background: #2f9e6b;
+}
+
+.facts {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.facts div {
+  display: flex;
+  gap: 12px;
+}
+
+.facts dt {
+  min-width: 96px;
+  color: #5b7078;
+}
+
+.facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+.hint {
+  color: #5b7078;
+  font-size: 14px;
+}
+
+.error {
+  color: #a33a2b;
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+button {
+  padding: 10px 16px;
+  border: 1px solid #cfdadc;
+  border-radius: 10px;
+  background: #fdfefe;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  border-color: #39756d;
+}
