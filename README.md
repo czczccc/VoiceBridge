@@ -4,7 +4,7 @@ Android ↔ Windows 局域网语音文本与纯文本剪切板工具。
 
 语音识别由手机当前输入法完成。VoiceBridge 计划将 Android 文本框的变化同步到 Windows 用户确认的输入位置，并支持双向纯文本剪切板。
 
-**当前进度**：TASK-000 ~ TASK-008 的代码均已实现并通过 CI（通知入口跳转已真机确认，权限拒绝场景待验证）；用户已手动验证到 TASK-007 之前。语音优先主界面和「远程换行不触发回车」已通过 CI 与真机验证；ChatGPT 式语音界面（方案 A）已通过 CI 并由真机截图确认；分段时长、目标窗口名、暂停同步与键盘图标已通过 CI（test.35），真机待验证；剪切板、托盘与设置尚未实现。实施顺序与实际验证结果见 [Docs/TASKS.md](Docs/TASKS.md)。
+**当前进度**：TASK-000 ~ TASK-008 的代码均已实现并通过 CI（通知入口跳转已真机确认，权限拒绝场景待验证）；用户已手动验证到 TASK-007 之前。语音优先主界面和「远程换行不触发回车」已通过 CI 与真机验证；ChatGPT 式语音界面（方案 A）已通过 CI 并由真机截图确认；分段时长、目标窗口名、暂停同步与键盘图标已通过 CI（test.35），真机待验证；Windows 关闭窗口最小化到托盘已实现（待 CI 与实机验证）；剪切板与设置尚未实现。实施顺序与实际验证结果见 [Docs/TASKS.md](Docs/TASKS.md)。
 
 ## 仓库结构
 
@@ -32,6 +32,7 @@ VoiceBridge/
 2. 等待 Android 与 Windows 构建检查完成。main 分支还会构建固定签名 APK，并在两端检查通过后发布到 [Android 测试版 Releases](https://github.com/czczccc/VoiceBridge/releases/tag/android-testing)。首次构建需下载依赖。
 3. 手机首次安装：从上述 Releases 下载 `VoiceBridge-数字.apk` 中版本号最大的包。后续打开 App 自动检查，点击下载和安装即可更新，不用再去 GitHub 查找。
 4. Windows 首次安装：从 **Artifacts** 的 `voicebridge-windows-x64` 或 [Windows 测试版 Releases](https://github.com/czczccc/VoiceBridge/releases/tag/windows-testing) 下载并安装。之后打开应用，在「版本更新」点「检查更新」→「下载并安装」，更新在应用内完成，不用再手动下载。
+   - 点窗口右上角 X 只会收起窗口，后台继续同步；左键单击托盘图标恢复窗口，右键托盘图标选择「退出 VoiceBridge」才会真正退出。
    - `voicebridge-android-debug`：解压得到 `app-debug.apk`，仅供诊断，日常手机测试请用 Releases 固定签名包。
    - `android-check-reports`：Android Lint 等检查报告；可用于排查失败。
 

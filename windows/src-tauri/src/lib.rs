@@ -1,5 +1,8 @@
 use std::sync::Arc;
+use std::time::Duration;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, State};
 
 pub mod discovery;
@@ -106,6 +109,65 @@ async fn stop_input_session(server: State<'_, Arc<Server>>) -> Result<Option<Str
     Ok(server.stop_session())
 }
 
+const TRAY_ID: &str = "voicebridge-tray";
+const TRAY_SHOW: &str = "tray-show";
+const TRAY_QUIT: &str = "tray-quit";
+
+/// Hiding instead of closing keeps the service and any active input session
+/// running, so the window has to stay reachable from the tray.
+fn restore_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// The only path that really quits: leaving the listener or an armed input
+/// session behind after the UI is gone would keep writing to the target window.
+fn quit_application(app: &tauri::AppHandle, server: Arc<Server>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        server.stop_session();
+        // A stuck connection must not keep the process alive after the user quit.
+        let _ = tokio::time::timeout(Duration::from_secs(3), server.stop()).await;
+        app.exit(0);
+    });
+}
+
+fn install_tray(app: &tauri::App, server: Arc<Server>) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, TRAY_SHOW, "显示主窗口", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, TRAY_QUIT, "退出 VoiceBridge", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip("VoiceBridge")
+        .menu(&menu)
+        // Left click restores the window; the menu is on right click.
+        .show_menu_on_left_click(false)
+        .on_menu_event(move |app, event| match event.id().as_ref() {
+            TRAY_SHOW => restore_main_window(app),
+            TRAY_QUIT => quit_application(app, server.clone()),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                restore_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -124,7 +186,18 @@ pub fn run() {
                 Ok(identity) => server.set_identity(identity),
                 Err(error) => eprintln!("voicebridge identity unavailable: {error}"),
             }
-            app.manage(server);
+            app.manage(server.clone());
+            install_tray(app, server)?;
+            if let Some(window) = app.get_webview_window("main") {
+                let window_for_close = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // The X button hides the window; quitting is a tray action.
+                        api.prevent_close();
+                        let _ = window_for_close.hide();
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
