@@ -56,7 +56,7 @@ async fn read_error_code(socket: &mut Socket) -> ErrorCode {
     };
     match protocol::decode(&bytes).expect("error frame decodes").body {
         Body::Error { code, .. } => code,
-        other => panic!("unexpected body: {other:?}"),
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
     }
 }
 
@@ -95,7 +95,7 @@ fn unsupported_message_types_are_never_authorized() {
             assert_eq!(code, ErrorCode::AuthFailed);
             assert!(!message.contains("秘密"));
         }
-        other => panic!("unexpected body: {other:?}"),
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
     }
     assert!(!String::from_utf8_lossy(&frame).contains("秘密"));
 }
