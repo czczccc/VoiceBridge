@@ -233,7 +233,7 @@ async fn unauthorized_frames_are_refused_without_logging_bodies() {
         assert!(!line.contains(secret), "log leaked body: {line}");
         assert!(!line.contains(wrong), "log leaked credential: {line}");
     }
-    assert!(lines.iter().any(|line| line.contains("AuthFailed")));
+    assert!(lines.iter().any(|line| line == "auth-failed"));
     fixture.server.stop().await;
 }
 
