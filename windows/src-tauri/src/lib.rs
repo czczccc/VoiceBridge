@@ -47,18 +47,18 @@ async fn stop_server(server: State<'_, Arc<Server>>) -> Result<Status, String> {
 
 /// Safe to display: it is the public half of the local identity.
 #[tauri::command]
-async fn local_fingerprint(server: State<'_, Arc<Server>>) -> Option<String> {
-    server.fingerprint()
+async fn local_fingerprint(server: State<'_, Arc<Server>>) -> Result<Option<String>, String> {
+    Ok(server.fingerprint())
 }
 
 #[tauri::command]
-async fn list_devices(server: State<'_, Arc<Server>>) -> Vec<DeviceSummary> {
-    server
+async fn list_devices(server: State<'_, Arc<Server>>) -> Result<Vec<DeviceSummary>, String> {
+    Ok(server
         .list_devices()
         .await
         .into_iter()
         .map(DeviceSummary::from)
-        .collect()
+        .collect())
 }
 
 #[tauri::command]
