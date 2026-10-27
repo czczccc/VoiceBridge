@@ -99,7 +99,15 @@ object Protocol {
     private fun long(element: JsonElement?): Long {
         val value = element as? JsonPrimitive ?: throw ProtocolException(ErrorCode.INVALID_MESSAGE)
         requireValid(!value.isString && integer.matches(value.content))
-        return value.longOrNull ?: throw ProtocolException(ErrorCode.INVALID_MESSAGE)
+        val parsed = value.longOrNull ?: throw ProtocolException(ErrorCode.INVALID_MESSAGE)
+        requireValid(parsed in 0..MAX_PROTOCOL_INTEGER)
+        return parsed
+    }
+
+    private fun boolean(element: JsonElement?): Boolean {
+        val value = element as? JsonPrimitive ?: throw ProtocolException(ErrorCode.INVALID_MESSAGE)
+        requireValid(!value.isString && (value.content == "true" || value.content == "false"))
+        return value.content == "true"
     }
 
     private fun string(element: JsonElement?): String {
@@ -169,6 +177,7 @@ object Protocol {
                 string(it.jsonObject["focusPolicy"])
             }
             root["capabilities"]?.let { it.jsonArray.forEach { capability -> string(capability) } }
+            root["authenticated"]?.let { boolean(it) }
             // Reject quoted, fractional and out-of-range integer payloads before decoding.
             for (key in listOf("seq", "latencyMs")) root[key]?.let { long(it) }
             for (key in listOf("selection", "composition")) {
