@@ -3,6 +3,7 @@ package com.voicebridge.android.network
 import com.voicebridge.android.pairing.fingerprintOf
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLException
 import javax.net.ssl.TrustManager
@@ -36,6 +37,9 @@ fun clientFor(fingerprint: String): OkHttpClient {
         // The hash is exactly what the user confirmed during pairing, so it authenticates the
         // device and is not weakened by skipping the name check.
         .hostnameVerifier { _, _ -> true }
+        // A peer that dies without a TCP reset (Wi-Fi drop, PC sleep) would otherwise look
+        // connected forever and the reconnect loop would never run.
+        .pingInterval(15, TimeUnit.SECONDS)
         .build()
 }
 

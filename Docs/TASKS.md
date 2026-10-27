@@ -249,6 +249,34 @@
 - 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
 - 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
+## TASK-005~007 实施与验证记录（快照发送与差异注入）
+
+状态：代码完成，**待 CI 验证**；端到端行为待真机测试。用户要求 005/006/007 合并为一次推送。
+
+已实现（TASK-005 Android）：
+- `BridgeClient`：用已存 token 走 `hello` 认证的长连接，指数退避重连（1 s→30 s + 抖动），15 s WebSocket ping 检测静默断线；断线即清除 sessionId 与序号。
+- `SnapshotSequencer`：序号从 1 严格递增，编码失败回滚、`rejected-session` 清空。
+- `SnapshotGate`：合并窗口为 `BuildConfig.SNAPSHOT_WINDOW_MS`（默认 50 ms，落在文档要求的 30–80 ms）。
+- `SyncViewModel`/`SyncStatusRow`：显示未连接/已连接等待会话/正在同步/错误码；配对或解除配对即时生效。
+- 编码在发送锁内完成，保证 seq 与发送顺序一致；超限时返回错误码且不发送截断帧。
+
+已实现（TASK-006 Windows）：
+- `SessionManager` 状态机：`Armed → Active`，焦点变化或选区非空 → `PausedFocus` 并拒绝后续注入（须重新开始会话）；`stop` 立即清空。
+- 启动会话时延迟 3 秒再捕获前台窗口，让用户从 VoiceBridge 切到目标输入框；界面显示目标窗口标题。
+- 快照校验：sessionId、seq 严格递增、已绑定设备、焦点句柄一致；失败分别返回 `rejected-session` / `stale` / `paused-focus` / `injection-error`。
+- `TextInjectionBackend` trait + `SendInputBackend`（Unicode 键事件，`
+` 转 Enter，`` 跳过），可注入假后端做测试。
+
+已实现（TASK-007 Windows）：
+- `diff::delta` 用 UTF-16 code unit 求最长公共前缀，代理对不拆分；只回退变化尾部再输入新内容，**不使用 Ctrl+A 全选粘贴**。
+- 服务端按 `text.snapshot` 应用并回 `text.ack`（含耗时）；会话启停通过广播下发给已认证连接。
+
+未验证 / 风险：
+- 未编译、未运行；CI 结果未知。
+- 真机未验证：中文输入法增量/整句提交、emoji、换行、焦点切换暂停、停止后迟到消息丢弃。
+- `SendInput` 在部分控件（管理员窗口、终端、自绘控件）可能无效，需按 TASK-011 实测。
+- 无线网络抖动下的重连与序号重置只有单元测试覆盖。
+
 ## TASK-004 实施与验证记录（Android 输入法文本框）
 
 状态：代码完成，**待 CI 验证**；真机输入法行为待用户测试。

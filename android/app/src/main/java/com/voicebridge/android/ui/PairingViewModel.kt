@@ -233,7 +233,7 @@ class PairingViewModel(application: Application) : AndroidViewModel(application)
  * The phone's own id as the Windows side sees it. It is stable across attempts and app restarts so
  * the PC keeps showing the same device instead of a new one after every pairing.
  */
-private fun clientDeviceId(application: Application): String {
+internal fun clientDeviceId(application: Application): String {
     val preferences = application.getSharedPreferences(IDENTITY_PREFERENCES, Context.MODE_PRIVATE)
     preferences.getString(ENTRY_DEVICE_ID, null)?.let { return it }
     val generated = "android-${randomBase64Url(DEVICE_ID_BYTES)}"

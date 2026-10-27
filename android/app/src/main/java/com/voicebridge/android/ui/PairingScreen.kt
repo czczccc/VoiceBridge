@@ -37,12 +37,16 @@ import com.voicebridge.android.discovery.DiscoveredComputer
  * where DNS-SD does not work.
  */
 @Composable
-fun PairingScreen(viewModel: PairingViewModel = viewModel()) {
+fun PairingScreen(viewModel: PairingViewModel = viewModel(), sync: SyncViewModel = viewModel()) {
     val computers by viewModel.computers.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val stored by viewModel.stored.collectAsStateWithLifecycle()
+    val syncState by sync.state.collectAsStateWithLifecycle()
+    val session by sync.session.collectAsStateWithLifecycle()
     var manualEntryVisible by remember { mutableStateOf(false) }
 
+    // The credential lives here, so this is also where the bridge learns to start or stop.
+    LaunchedEffect(stored) { sync.useCredential(stored) }
     LaunchedEffect(Unit) { viewModel.startDiscovery() }
     DisposableEffect(Unit) {
         onDispose { viewModel.stopDiscovery() }
@@ -68,6 +72,7 @@ fun PairingScreen(viewModel: PairingViewModel = viewModel()) {
                 }
             }
         }
+        SyncStatusRow(stored = stored, state = syncState, session = session)
         // The stored row already says "已配对"; a second identical line only confuses.
         StatusBlock(state, showPaired = stored == null)
         if (computers.isEmpty() && stored == null) {

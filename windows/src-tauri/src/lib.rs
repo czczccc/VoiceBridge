@@ -4,14 +4,17 @@ use tauri::{Manager, State};
 
 pub mod discovery;
 pub mod identity;
+pub mod input;
 pub mod pairing;
 pub mod protocol;
 pub mod server;
+pub mod session;
 
 use identity::Identity;
 use pairing::devices::{Device, DeviceStore};
 use pairing::session::PendingPairing;
 use server::{Server, Status};
+use session::SessionInfo;
 
 /// What the UI may see. The stored token digest never leaves the backend.
 #[derive(serde::Serialize)]
@@ -80,6 +83,24 @@ async fn pairing_decide(server: State<'_, Arc<Server>>, accept: bool) -> Result<
     server.decide_pairing(accept).await
 }
 
+#[tauri::command]
+async fn input_session_status(
+    server: State<'_, Arc<Server>>,
+) -> Result<Option<SessionInfo>, String> {
+    Ok(server.session_info())
+}
+
+/// Waits three seconds, then captures whatever window is in front and arms a session.
+#[tauri::command]
+async fn start_input_session(server: State<'_, Arc<Server>>) -> Result<SessionInfo, String> {
+    server.start_session().await
+}
+
+#[tauri::command]
+async fn stop_input_session(server: State<'_, Arc<Server>>) -> Result<Option<String>, String> {
+    Ok(server.stop_session())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -109,7 +130,10 @@ pub fn run() {
             list_devices,
             revoke_device,
             pairing_pending,
-            pairing_decide
+            pairing_decide,
+            input_session_status,
+            start_input_session,
+            stop_input_session
         ])
         .run(tauri::generate_context!())
         .expect("VoiceBridge failed to start");

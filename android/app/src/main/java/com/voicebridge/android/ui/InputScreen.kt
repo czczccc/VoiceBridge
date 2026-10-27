@@ -10,6 +10,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -32,7 +33,7 @@ import com.voicebridge.android.R
  * refuse or delay that request, so the field remains tappable either way.
  */
 @Composable
-fun InputScreen(model: InputViewModel = viewModel()) {
+fun InputScreen(model: InputViewModel = viewModel(), sync: SyncViewModel = viewModel()) {
     val value by model.value.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -40,6 +41,11 @@ fun InputScreen(model: InputViewModel = viewModel()) {
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
         keyboard?.show()
+    }
+    // The field is the only writer the snapshot layer listens to, so it also owns the attachment.
+    DisposableEffect(model, sync) {
+        sync.attachInput(model)
+        onDispose { sync.detachInput() }
     }
 
     Row(

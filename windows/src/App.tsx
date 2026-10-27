@@ -1,5 +1,6 @@
 import { PairingPanel } from "./components/PairingPanel";
 import { ServerPanel } from "./components/ServerPanel";
+import { SessionPanel } from "./components/SessionPanel";
 import { UpdatePanel } from "./components/UpdatePanel";
 
 export default function App() {
@@ -10,6 +11,7 @@ export default function App() {
       <p>手机输入，电脑接续。</p>
       <ServerPanel />
       <PairingPanel />
+      <SessionPanel />
       <UpdatePanel />
       <section aria-label="功能状态">
         <h2>后续版本</h2>

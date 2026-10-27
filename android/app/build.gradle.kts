@@ -15,6 +15,7 @@ android {
         targetSdk = 35
         versionCode = providers.environmentVariable("VOICEBRIDGE_VERSION_CODE").orElse("1").get().toInt()
         versionName = providers.environmentVariable("VOICEBRIDGE_VERSION_NAME").orElse("0.1.0-dev").get()
+        buildConfigField("long", "SNAPSHOT_WINDOW_MS", "50")
         buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://github.com/czczccc/VoiceBridge/releases/download/android-testing/update.json\"")
     }
 

@@ -1,11 +1,11 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{oneshot, Mutex, Semaphore};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -17,7 +17,8 @@ use crate::pairing::devices::{Device, DeviceStore};
 use crate::pairing::session::{
     now_millis, ClientConfirm, PairOutcome, PairingManager, PendingPairing, PAIRING_TTL_MS,
 };
-use crate::protocol::{self, Body, ErrorCode, Message, PairStatus};
+use crate::protocol::{self, Body, ErrorCode, FocusPolicy, Message, PairStatus, Target};
+use crate::session::{SessionInfo, SessionManager};
 
 pub mod log;
 pub mod tls;
@@ -74,6 +75,8 @@ pub struct Server {
     pairing: StdMutex<Option<Arc<PairingManager>>>,
     advert: StdMutex<Option<Advertiser>>,
     devices: Arc<Mutex<DeviceStore>>,
+    sessions: Arc<SessionManager>,
+    outbound: broadcast::Sender<Vec<u8>>,
 }
 
 impl Server {
@@ -83,6 +86,8 @@ impl Server {
 
     /// Port 0 lets the OS pick a free port, which keeps parallel tests independent.
     fn with_port(sink: Arc<dyn LogSink>, devices: DeviceStore, port: u16) -> Self {
+        let (backend, focus) = crate::session::defaults();
+        let (outbound, _) = broadcast::channel(32);
         Self {
             state: Mutex::new(None),
             sink,
@@ -91,6 +96,8 @@ impl Server {
             pairing: StdMutex::new(None),
             advert: StdMutex::new(None),
             devices: Arc::new(Mutex::new(devices)),
+            sessions: Arc::new(SessionManager::new(backend, focus)),
+            outbound,
         }
     }
 
@@ -158,6 +165,45 @@ impl Server {
             .map_err(|_| "无法保存配对决定".to_string())
     }
 
+    pub fn session_info(&self) -> Option<SessionInfo> {
+        self.sessions.info()
+    }
+
+    /// Arms a session against the window that is in front after a short delay, so the
+    /// user can move focus from this window to the real target before capture.
+    pub async fn start_session(&self) -> Result<SessionInfo, String> {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let Some(target) = self.sessions.foreground() else {
+            return Err("没有找到可输入的目标窗口，请先点击要输入的位置".to_string());
+        };
+        let info = self.sessions.start(target);
+        self.broadcast(Body::SessionStart {
+            session_id: info.session_id.clone(),
+            target: Target {
+                window_label: info.target_label.clone(),
+                focus_policy: FocusPolicy::PauseOnFocusChange,
+            },
+        });
+        Ok(info)
+    }
+
+    pub fn stop_session(&self) -> Option<String> {
+        let id = self.sessions.stop();
+        if let Some(stopped) = id.clone() {
+            self.broadcast(Body::SessionStop {
+                session_id: stopped,
+                reason: "user".to_string(),
+            });
+        }
+        id
+    }
+
+    fn broadcast(&self, body: Body) {
+        if let Some(frame) = encode_body(body) {
+            let _ = self.outbound.send(frame);
+        }
+    }
+
     /// Starts the WSS listener. `allow_lan` is an explicit, per-session opt-in:
     /// without it the service only listens on loopback.
     pub async fn start(&self, allow_lan: bool) -> Result<Status, String> {
@@ -189,15 +235,15 @@ impl Server {
             .map_err(|_| "无法获取监听地址".to_string())?;
 
         let (shutdown, receiver) = oneshot::channel();
-        let task = tokio::spawn(accept_loop(
-            listener,
-            receiver,
-            self.sink.clone(),
-            acceptor,
-            self.devices.clone(),
-            self.pairing(),
-            identity.fingerprint().to_string(),
-        ));
+        let context = Arc::new(ConnectionContext {
+            sink: self.sink.clone(),
+            devices: self.devices.clone(),
+            pairing: self.pairing(),
+            sessions: self.sessions.clone(),
+            outbound: self.outbound.clone(),
+            fingerprint: identity.fingerprint().to_string(),
+        });
+        let task = tokio::spawn(accept_loop(listener, receiver, acceptor, context));
         self.sink
             .record(&format!("started bind={} lan={allow_lan}", addr.ip()));
         let reported = if allow_lan {
@@ -306,14 +352,20 @@ fn primary_lan_ip() -> Option<Ipv4Addr> {
     }
 }
 
+struct ConnectionContext {
+    sink: Arc<dyn LogSink>,
+    devices: Arc<Mutex<DeviceStore>>,
+    pairing: Option<Arc<PairingManager>>,
+    sessions: Arc<SessionManager>,
+    outbound: broadcast::Sender<Vec<u8>>,
+    fingerprint: String,
+}
+
 async fn accept_loop(
     listener: TcpListener,
     shutdown: oneshot::Receiver<()>,
-    sink: Arc<dyn LogSink>,
     acceptor: TlsAcceptor,
-    devices: Arc<Mutex<DeviceStore>>,
-    pairing: Option<Arc<PairingManager>>,
-    fingerprint: String,
+    context: Arc<ConnectionContext>,
 ) {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     tokio::pin!(shutdown);
@@ -325,22 +377,23 @@ async fn accept_loop(
                     let permit = match permits.clone().try_acquire_owned() {
                         Ok(permit) => permit,
                         Err(_) => {
-                            sink.record("connection-rejected reason=too-many-connections");
+                            context
+                                .sink
+                                .record("connection-rejected reason=too-many-connections");
                             continue;
                         }
                     };
-                    let sink = sink.clone();
                     let acceptor = acceptor.clone();
-                    let devices = devices.clone();
-                    let pairing = pairing.clone();
-                    let fingerprint = fingerprint.clone();
+                    let context = context.clone();
                     tokio::spawn(async move {
-                        serve_connection(stream, acceptor, sink, devices, pairing, fingerprint).await;
+                        serve_connection(stream, acceptor, context).await;
                         drop(permit);
                     });
                 }
                 Err(error) => {
-                    sink.record(&format!("accept-failed kind={:?}", error.kind()));
+                    context
+                        .sink
+                        .record(&format!("accept-failed kind={:?}", error.kind()));
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }
@@ -352,10 +405,7 @@ async fn accept_loop(
 async fn serve_connection(
     stream: TcpStream,
     acceptor: TlsAcceptor,
-    sink: Arc<dyn LogSink>,
-    devices: Arc<Mutex<DeviceStore>>,
-    pairing: Option<Arc<PairingManager>>,
-    fingerprint: String,
+    context: Arc<ConnectionContext>,
 ) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(protocol::MAX_MESSAGE_BYTES))
@@ -364,11 +414,11 @@ async fn serve_connection(
     let tls = match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
         Ok(Ok(tls)) => tls,
         _ => {
-            sink.record("tls-handshake-failed");
+            context.sink.record("tls-handshake-failed");
             return;
         }
     };
-    let mut socket = match tokio::time::timeout(
+    let socket = match tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
         tokio_tungstenite::accept_async_with_config(tls, Some(config)),
     )
@@ -376,27 +426,61 @@ async fn serve_connection(
     {
         Ok(Ok(socket)) => socket,
         _ => {
-            sink.record("handshake-failed");
+            context.sink.record("handshake-failed");
             return;
         }
     };
+    let (mut sink, mut incoming) = socket.split();
 
-    // Device id of the authenticated peer. `None` means only pairing and `hello` are allowed.
-    let mut authenticated: Option<String> = None;
+    // Replies and broadcasts both leave through this channel, so the read loop never
+    // borrows the socket for writing.
+    let (frames, mut queued) = mpsc::channel::<Vec<u8>>(32);
+    let writer = tokio::spawn(async move {
+        while let Some(frame) = queued.recv().await {
+            if sink.send(WsMessage::Binary(frame.into())).await.is_err() {
+                break;
+            }
+        }
+        let _ = sink.close().await;
+    });
 
+    let authenticated = Arc::new(AtomicBool::new(false));
+    let mut broadcasts = context.outbound.subscribe();
+    let forward = {
+        let authenticated = authenticated.clone();
+        let frames = frames.clone();
+        tokio::spawn(async move {
+            loop {
+                match broadcasts.recv().await {
+                    Ok(frame) => {
+                        if !authenticated.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        if frames.send(frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    };
+
+    let mut device: Option<String> = None;
     loop {
-        let incoming = tokio::time::timeout(IDLE_TIMEOUT, socket.next()).await;
-        let payload = match incoming {
+        let inbound = tokio::time::timeout(IDLE_TIMEOUT, incoming.next()).await;
+        let payload = match inbound {
             Ok(Some(Ok(WsMessage::Binary(bytes)))) => bytes.to_vec(),
             Ok(Some(Ok(WsMessage::Text(text)))) => text.as_str().as_bytes().to_vec(),
             Ok(Some(Ok(WsMessage::Close(_)))) | Ok(None) => break,
             Ok(Some(Ok(_))) => continue,
             Ok(Some(Err(_))) => {
-                sink.record("read-failed");
+                context.sink.record("read-failed");
                 break;
             }
             Err(_) => {
-                sink.record("idle-timeout");
+                context.sink.record("idle-timeout");
                 break;
             }
         };
@@ -404,122 +488,181 @@ async fn serve_connection(
         let message = match protocol::decode(&payload) {
             Ok(message) => message,
             Err(code) => {
-                sink.record(&format!("frame-rejected code={code:?}"));
-                let _ = socket
-                    .send(WsMessage::Binary(error_frame(code).into()))
-                    .await;
+                context
+                    .sink
+                    .record(&format!("frame-rejected code={code:?}"));
+                let _ = frames.send(error_frame(code)).await;
                 break;
             }
         };
-        sink.record(&format!("frame-handled type={}", kind(&message.body)));
+        context
+            .sink
+            .record(&format!("frame-handled type={}", kind(&message.body)));
 
-        let closing = match &message.body {
+        let (reply, close) = match &message.body {
             Body::Hello {
                 device_id, auth, ..
             } => {
-                if authenticated.is_some() {
-                    send(&mut socket, error_frame(ErrorCode::InvalidMessage)).await
-                } else if authorize(&devices, device_id, &auth.token).await {
-                    authenticated = Some(device_id.clone());
-                    send(&mut socket, acknowledgement()).await
+                if device.is_some() {
+                    (Some(error_frame(ErrorCode::InvalidMessage)), false)
+                } else if authorize(&context.devices, device_id, &auth.token).await {
+                    device = Some(device_id.clone());
+                    authenticated.store(true, Ordering::Relaxed);
+                    (Some(acknowledgement()), false)
                 } else {
-                    sink.record("auth-failed");
-                    let _ = socket
-                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
-                        .await;
-                    true
+                    context.sink.record("auth-failed");
+                    (Some(error_frame(ErrorCode::AuthFailed)), true)
                 }
             }
             Body::PairRequest {
                 device_id,
                 device_name,
                 ..
-            } => {
-                if authenticated.is_some() {
-                    send(&mut socket, error_frame(ErrorCode::InvalidMessage)).await
-                } else if let Some(pairing) = pairing.as_ref() {
-                    match pairing.begin(device_id, device_name) {
-                        Ok(challenge) => {
-                            let frame = encode_body(Body::PairChallenge {
-                                pairing_id: challenge.pairing_id,
-                                server_device_id: pairing.server_device_id().to_string(),
-                                server_name: pairing.server_name().to_string(),
-                                server_nonce: challenge.server_nonce,
-                                cert_fingerprint: fingerprint.clone(),
-                                expires_at: challenge.expires_at,
-                            });
-                            send(&mut socket, frame.unwrap_or_default()).await
-                        }
-                        Err(_) => {
-                            let _ = socket
-                                .send(WsMessage::Binary(
-                                    error_frame(ErrorCode::RateLimited).into(),
-                                ))
-                                .await;
-                            true
-                        }
-                    }
-                } else {
-                    let _ = socket
-                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
-                        .await;
-                    true
-                }
-            }
+            } => pairing_reply(&context, device.is_some(), device_id, device_name).await,
             Body::PairConfirm {
                 pairing_id,
                 confirmed,
-            } => {
-                if authenticated.is_some() {
-                    send(&mut socket, error_frame(ErrorCode::InvalidMessage)).await
-                } else if let Some(pairing) = pairing.as_ref() {
-                    let outcome = match pairing.client_confirm(pairing_id, *confirmed).await {
-                        ClientConfirm::Complete(outcome) => Some(outcome),
-                        ClientConfirm::Waiting(receiver) => {
-                            PairingManager::wait(receiver, Duration::from_millis(PAIRING_TTL_MS))
-                                .await
-                        }
-                        ClientConfirm::Stale => None,
-                    };
-                    let outcome = outcome.unwrap_or(PairOutcome::Expired);
-                    if matches!(outcome, PairOutcome::Expired) {
-                        pairing.expire(pairing_id);
+            } => pairing_confirm(&context, device.is_some(), pairing_id, *confirmed).await,
+            Body::TextSnapshot {
+                session_id,
+                seq,
+                text,
+                selection,
+                ..
+            } => match device.as_deref() {
+                None => {
+                    context.sink.record("auth-required");
+                    (Some(error_frame(ErrorCode::AuthFailed)), true)
+                }
+                Some(device_id) => {
+                    let started = now_millis();
+                    let status = context
+                        .sessions
+                        .apply(device_id, session_id, *seq, text, *selection);
+                    let latency = now_millis()
+                        .saturating_sub(started)
+                        .min(protocol::MAX_INTEGER);
+                    (
+                        encode_body(Body::TextAck {
+                            session_id: session_id.clone(),
+                            seq: *seq,
+                            status,
+                            latency_ms: latency,
+                        }),
+                        false,
+                    )
+                }
+            },
+            Body::SessionStop { reason, .. } => {
+                if device.is_none() {
+                    (Some(error_frame(ErrorCode::AuthFailed)), true)
+                } else if let Some(stopped) = context.sessions.stop() {
+                    if let Some(frame) = encode_body(Body::SessionStop {
+                        session_id: stopped,
+                        reason: reason.clone(),
+                    }) {
+                        let _ = context.outbound.send(frame);
                     }
-                    let frame = encode_body(pair_result_frame(
-                        pairing_id,
-                        outcome,
-                        pairing.server_device_id(),
-                        pairing.server_name(),
-                    ));
-                    // The client reconnects and authenticates with the new token.
-                    let _ = socket
-                        .send(WsMessage::Binary(frame.unwrap_or_default().into()))
-                        .await;
-                    true
+                    (None, false)
                 } else {
-                    let _ = socket
-                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
-                        .await;
-                    true
+                    (None, false)
                 }
             }
             _ => {
-                if authenticated.is_some() {
-                    send(&mut socket, error_frame(ErrorCode::SessionNotActive)).await
+                if device.is_some() {
+                    (Some(error_frame(ErrorCode::SessionNotActive)), false)
                 } else {
-                    sink.record("auth-required");
-                    let _ = socket
-                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
-                        .await;
-                    true
+                    context.sink.record("auth-required");
+                    (Some(error_frame(ErrorCode::AuthFailed)), true)
                 }
             }
         };
-        if closing {
+
+        if let Some(frame) = reply {
+            if frames.send(frame).await.is_err() {
+                break;
+            }
+        }
+        if close {
             break;
         }
     }
-    let _ = socket.close(None).await;
+
+    forward.abort();
+    drop(frames);
+    let _ = tokio::time::timeout(Duration::from_secs(5), writer).await;
+
+    // The session belongs to the device that was writing; once it disconnects the
+    // session cannot continue.
+    if let Some(device_id) = device {
+        if context.sessions.bound_device().as_deref() == Some(device_id.as_str()) {
+            context.sessions.stop();
+            context
+                .sink
+                .record("session-stopped reason=peer-disconnected");
+        }
+    }
+}
+
+async fn pairing_reply(
+    context: &ConnectionContext,
+    authenticated: bool,
+    device_id: &str,
+    device_name: &str,
+) -> (Option<Vec<u8>>, bool) {
+    if authenticated {
+        return (Some(error_frame(ErrorCode::InvalidMessage)), false);
+    }
+    let Some(pairing) = context.pairing.as_ref() else {
+        return (Some(error_frame(ErrorCode::AuthFailed)), true);
+    };
+    match pairing.begin(device_id, device_name) {
+        Ok(challenge) => {
+            let frame = encode_body(Body::PairChallenge {
+                pairing_id: challenge.pairing_id,
+                server_device_id: pairing.server_device_id().to_string(),
+                server_name: pairing.server_name().to_string(),
+                server_nonce: challenge.server_nonce,
+                cert_fingerprint: context.fingerprint.clone(),
+                expires_at: challenge.expires_at,
+            });
+            (Some(frame.unwrap_or_default()), false)
+        }
+        Err(_) => (Some(error_frame(ErrorCode::RateLimited)), true),
+    }
+}
+
+async fn pairing_confirm(
+    context: &ConnectionContext,
+    authenticated: bool,
+    pairing_id: &str,
+    confirmed: bool,
+) -> (Option<Vec<u8>>, bool) {
+    if authenticated {
+        return (Some(error_frame(ErrorCode::InvalidMessage)), false);
+    }
+    let Some(pairing) = context.pairing.as_ref() else {
+        return (Some(error_frame(ErrorCode::AuthFailed)), true);
+    };
+    let outcome = match pairing.client_confirm(pairing_id, confirmed).await {
+        ClientConfirm::Complete(outcome) => Some(outcome),
+        ClientConfirm::Waiting(receiver) => {
+            PairingManager::wait(receiver, Duration::from_millis(PAIRING_TTL_MS)).await
+        }
+        ClientConfirm::Stale => None,
+    };
+    let outcome = outcome.unwrap_or(PairOutcome::Expired);
+    if matches!(outcome, PairOutcome::Expired) {
+        pairing.expire(pairing_id);
+    }
+    let frame = encode_body(pair_result_frame(
+        pairing_id,
+        outcome,
+        pairing.server_device_id(),
+        pairing.server_name(),
+    ));
+    // The client reconnects and authenticates with the new token.
+    (Some(frame.unwrap_or_default()), true)
 }
 
 async fn authorize(devices: &Mutex<DeviceStore>, device_id: &str, token: &str) -> bool {
@@ -530,13 +673,6 @@ async fn authorize(devices: &Mutex<DeviceStore>, device_id: &str, token: &str) -
         let _ = store.touch(device_id, now_millis());
     }
     authorized
-}
-
-async fn send(
-    socket: &mut tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<TcpStream>>,
-    frame: Vec<u8>,
-) -> bool {
-    socket.send(WsMessage::Binary(frame.into())).await.is_err()
 }
 
 fn pair_result_frame(

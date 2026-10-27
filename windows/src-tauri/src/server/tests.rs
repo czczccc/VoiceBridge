@@ -14,7 +14,7 @@ use super::log::MemorySink;
 use super::{Server, MAX_CONNECTIONS};
 use crate::identity::Identity;
 use crate::pairing::devices::DeviceStore;
-use crate::protocol::{self, Body, ErrorCode, Message, PairStatus};
+use crate::protocol::{self, AckStatus, Body, ErrorCode, Message, PairStatus};
 
 type Client = tokio_tungstenite::WebSocketStream<TlsStream<TcpStream>>;
 
@@ -257,12 +257,16 @@ async fn authorized_hello_keeps_the_connection_open() {
         other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
     }
 
-    // A second frame proves the server no longer closes after one message.
+    // A second frame proves the server no longer closes after one message. With no
+    // armed session the snapshot is acknowledged as rejected rather than dropped.
     socket
         .send(WsMessage::Binary(text_snapshot("正文").into()))
         .await
         .expect("send snapshot");
-    assert_eq!(next_error(&mut socket).await, ErrorCode::SessionNotActive);
+    match next_body(&mut socket).await {
+        Body::TextAck { status, .. } => assert_eq!(status, AckStatus::RejectedSession),
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    }
 
     // Re-authenticating on the same connection is a protocol error, not a crash.
     socket
