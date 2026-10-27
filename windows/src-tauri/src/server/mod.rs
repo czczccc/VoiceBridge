@@ -210,6 +210,10 @@ impl Server {
         } else {
             addr
         };
+        self.stop_advertising();
+        if allow_lan {
+            self.advertise(addr.port());
+        }
         *state = Some(Running {
             addr: reported,
             lan: allow_lan,
