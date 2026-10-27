@@ -51,13 +51,20 @@ struct Running {
 pub struct Server {
     state: Mutex<Option<Running>>,
     sink: Arc<dyn LogSink>,
+    port: u16,
 }
 
 impl Server {
     pub fn new(sink: Arc<dyn LogSink>) -> Self {
+        Self::with_port(sink, DEFAULT_PORT)
+    }
+
+    /// Port 0 lets the OS pick a free port, which keeps parallel tests independent.
+    fn with_port(sink: Arc<dyn LogSink>, port: u16) -> Self {
         Self {
             state: Mutex::new(None),
             sink,
+            port,
         }
     }
 
