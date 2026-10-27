@@ -194,7 +194,7 @@
 
 ## TASK-000 实施与验证记录
 
-状态：进行中。项目骨架与 GitHub Actions 已添加；在两端实际构建完成前不勾选验收，也不进入 TASK-001。
+状态：两端 CI 构建与检查通过，测试包已发布；等待用户真机安装与欢迎页启动验证，未进入 TASK-001。
 
 已实现：
 - 保留 `Docs/` 为文档目录，根 `README.md` 提供导航、依赖和构建命令，根 `CLAUDE.md` 指向完整项目约束。
@@ -210,11 +210,13 @@
 - 官方 Gradle Wrapper JAR SHA-256 与官方值一致，`bash ./gradlew --version` 下载并校验发行包，成功启动 Gradle 8.11.1。
 
 未验证 / 剩余风险：
-- 本机没有 Android SDK，Android APK、Lint 与单元测试任务须由 GitHub Actions 实际执行后确认。
-- 用户明确“本地编码、GitHub 构建、手机真机测试”后，已停止本地 Windows 构建、排队的 Rust 检查及 Android Gradle 配置检查进程；这些项目没有成功验证结果，等待 CI 执行。
-- 已提交推送并触发首轮 CI（40457294393）：Android SDK 初始化失败，setup-android 默认安装已下架 `tools` 包；改为明确安装 `platform-tools`，待新一轮 CI 验证。Windows 首轮仍在编译。配置验证不代表云端构建成功。
+- 用户明确分工后已停止本地构建；构建结果以 GitHub Actions 为准。
+- 首轮 CI 的 Android SDK 初始化失败（默认安装已下架 tools 包），已明确使用 platform-tools；第二轮 CI 40457483697 全部成功。
+- 已验证：Android debug/release 构建、Lint、各 3 个 JUnit 测试（零失败）；Windows 前端类型/格式、Rustfmt、Tauri release + NSIS、Clippy、cargo test 命令成功（Rust 尚无业务测试）。
+- 已发布 Android 固定签名 0.1.0-test.2（VoiceBridge-2.apk），CI 产物 SHA-256 与大小匹配更新清单；Releases 上传成功。
 - 两端页面尚无真实设备上的启动验证，尚无业务单元测试；无测试不能视为业务验收通过。
-- Windows 安装程序暂未代码签名；Android 固定签名 Secrets 已配置，首轮 CI 及测试版发布待验证。构建附件和 Releases 均用于开发验证。
+- Windows 安装程序暂未代码签名；Android 固定签名 Secrets 已用于成功构建和发布。构建附件和 Releases 均用于开发验证。
+- 当前运行存在 Actions Node 20 / setup-java v4 迁移提示，以及 gradlew 可执行位提示（Action 自动处理）；不影响本次构建结果，后续维护处理。
 
 假设：
 - GitHub 托管 runner 可访问 npm、crates.io、Google Maven 与 Gradle 发行包服务，并可下载 NSIS。
@@ -222,7 +224,7 @@
 
 ## 当前状态
 
-- [ ] TASK-000 仓库与构建基线（骨架和 CI 已添加，实际构建验证待完成）
+- [ ] TASK-000 仓库与构建基线（双端 CI 已通过并发布，等待用户设备启动验证）
 - [ ] TASK-001 协议模型
 - [ ] TASK-002 Windows 服务与 UI
 - [ ] TASK-003 配对与安全连接
