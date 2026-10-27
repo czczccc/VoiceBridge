@@ -384,6 +384,7 @@ async fn serve_connection(
                     authenticated = Some(device_id.clone());
                     send(&mut socket, acknowledgement()).await
                 } else {
+                    sink.record("auth-failed");
                     let _ = socket
                         .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
                         .await;
@@ -467,6 +468,7 @@ async fn serve_connection(
                 if authenticated.is_some() {
                     send(&mut socket, error_frame(ErrorCode::SessionNotActive)).await
                 } else {
+                    sink.record("auth-required");
                     let _ = socket
                         .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
                         .await;
