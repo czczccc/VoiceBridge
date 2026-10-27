@@ -256,7 +256,9 @@
 - CI 每次构建将版本改写为 `0.1.1-test.<run_number>`，生成 `*-setup.exe.sig` 与 `latest.json`，先上传安装包和签名、最后上传清单，中断时旧清单仍有效。
 - PR 不启用更新产物、不接触签名密钥，只做普通构建检查。
 
-已确认（不读取密钥值）：`gh secret list` 显示 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已配置；公钥已写入配置并通过 `JSON.parse`、Prettier、`tsc` 检查。
+已确认（不读取密钥值）：`gh secret list` 显示 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已配置；公钥已写入配置并通过 `JSON.parse`、Prettier、`tsc` 检查。CI 40465399406 全绿，发布 `windows-testing` 渠道：`VoiceBridge-13-setup.exe`、`.sig`、`latest.json`（版本 0.1.1-test.13）。
+
+实施中遇到并已修正的问题：PowerShell runner 不支持 bash heredoc（改为 `windows/scripts/*.mjs`）、NSIS 配置在 Tauri 2 需放在 `bundle.windows.nsis`、新增插件导致 `Cargo.lock` 过期且 `--locked` 拒绝构建（本地仅刷新 lock，不做编译）、以及在 CI 改写 `Cargo.toml` 版本会与 lock 冲突（改为只改 `tauri.conf.json` 版本）。
 
 待验证：
 - [ ] 首次安装带插件的版本（当前已安装的 0.1.0 无更新能力，需最后手动安装一次）。
