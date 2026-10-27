@@ -4,8 +4,13 @@ param(
 $ErrorActionPreference = "Stop"
 # Requires JDK keytool and authenticated GitHub CLI. Never print secret values.
 Get-Command keytool -ErrorAction Stop | Out-Null
-Get-Command gh -ErrorAction Stop | Out-Null
-& gh auth status
+$gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
+if (-not $gh) {
+    $candidate = Join-Path $env:ProgramFiles "GitHub CLI\gh.exe"
+    if (Test-Path $candidate) { $gh = $candidate }
+}
+if (-not $gh) { throw "GitHub CLI (gh) not found. Install GitHub CLI first." }
+& $gh auth status
 if ($LASTEXITCODE -ne 0) { throw "Run gh auth login first." }
 
 $folder = Join-Path $env:USERPROFILE ".voicebridge-signing"
@@ -38,7 +43,7 @@ try {
         ANDROID_KEY_PASSWORD = $password
     }
     foreach ($name in $secrets.Keys) {
-        $secrets[$name] | & gh secret set $name --repo $Repository
+        $secrets[$name] | & $gh secret set $name --repo $Repository
         if ($LASTEXITCODE -ne 0) { throw "Failed to upload $name. Keep local signing files for recovery." }
         Write-Host "Configured $name"
     }

@@ -25,6 +25,8 @@ async fn stop_server(server: State<'_, Arc<Server>>) -> Result<Status, String> {
 pub fn run() {
     let server = Arc::new(Server::new(server::log::stderr()));
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(server)
         .invoke_handler(tauri::generate_handler![
             server_status,

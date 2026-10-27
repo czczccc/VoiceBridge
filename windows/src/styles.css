@@ -118,3 +118,18 @@ button:disabled {
 button:not(:disabled):hover {
   border-color: #39756d;
 }
+
+.progress {
+  margin: 16px 0 0;
+}
+
+.progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #2f9e6b;
+  transition: width 120ms linear;
+}
+
+.progress p {
+  margin: 8px 0 0;
+}

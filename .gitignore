@@ -8,6 +8,7 @@ android/.kotlin/
 android/**/build/
 android/local.properties
 android/update-release/
+windows/update-release/
 
 # Local settings and secrets
 .idea/

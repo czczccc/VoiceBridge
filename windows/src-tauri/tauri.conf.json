@@ -20,15 +20,32 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src \u0027self\u0027; style-src \u0027self\u0027; img-src \u0027self\u0027 asset: http://asset.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
+    "createUpdaterArtifacts": true,
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "nsis": {
+      "installMode": "currentUser"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQTRGQzAzNDFBQzNBQTEKUldTaE9xeEJBL3lrMEhocm9TR2dIQ1F1VENmY2ZOMkp3MG82WC9JMFhXRFBaNW1Ya0psWFJqTGEK",
+      "endpoints": [
+        "https://github.com/czczccc/VoiceBridge/releases/download/windows-testing/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

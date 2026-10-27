@@ -245,6 +245,30 @@
 - [ ] GitHub 不可达时显示更新失败，现有应用仍可使用。
 - [ ] 错误摘要、错误签名、旧版本不安装。
 
+## 用户追加：Windows 测试版应用内更新
+
+用户明确要求跟随 Android 的做法，避免每次从 CI 手动下载安装包；该追加不属于 TASK-001 至 TASK-012 的进度调整。
+
+实现方式：
+- 使用 Tauri 官方 updater 插件，端点固定为 `https://github.com/czczccc/VoiceBridge/releases/download/windows-testing/latest.json`，仅 HTTPS。
+- 更新包必须通过 minisign 签名校验；公钥写入 `windows/src-tauri/tauri.conf.json`，私钥只存在于本机 `~/.voicebridge-signing/windows-updater.key` 与仓库 Secrets，不进入版本控制、不打印。
+- 安装包为 NSIS 当前用户安装、`passive` 模式：下载完成后显示进度窗口自动安装，不弹 UAC、不需要重新运行安装向导；安装程序会先关闭应用。
+- CI 每次构建将版本改写为 `0.1.1-test.<run_number>`，生成 `*-setup.exe.sig` 与 `latest.json`，先上传安装包和签名、最后上传清单，中断时旧清单仍有效。
+- PR 不启用更新产物、不接触签名密钥，只做普通构建检查。
+
+已确认（不读取密钥值）：`gh secret list` 显示 `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已配置；公钥已写入配置并通过 `JSON.parse`、Prettier、`tsc` 检查。
+
+待验证：
+- [ ] 首次安装带插件的版本（当前已安装的 0.1.0 无更新能力，需最后手动安装一次）。
+- [ ] 发布更高版本后，界面内依次完成检查、下载、自动安装，版本号随之更新且本机设置保留。
+- [ ] 断网或 GitHub 不可达时显示失败提示，应用继续可用。
+- [ ] 签名不匹配或被篡改的更新包被拒绝安装。
+
+已知风险：
+- 安装包未做代码签名，下载后的安装程序仍可能触发 SmartScreen 提示。
+- 私钥或密码丢失后，已安装用户将无法再接收更新，必须重新手动安装。
+- 依赖公开 GitHub 可达性；不支持回滚到旧版本。
+
 ## TASK-000 实施与验证记录
 
 状态：TASK-000 已完成。两端 CI 构建与检查通过；用户于 2026-10-27 分别提供 Android 和 Windows 安装后欢迎页截图，双端启动已确认。未进入 TASK-001。
