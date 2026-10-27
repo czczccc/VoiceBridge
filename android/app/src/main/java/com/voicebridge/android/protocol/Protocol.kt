@@ -92,7 +92,8 @@ enum class PairStatus {
 
 @Serializable class Auth(val token: String)
 @Serializable class Target(val windowLabel: String, val focusPolicy: FocusPolicy)
-@Serializable class TextRange(val start: Long, val end: Long)
+// Value semantics: two ranges with the same offsets are the same range.
+@Serializable data class TextRange(val start: Long, val end: Long)
 
 @Serializable
 enum class FocusPolicy { @SerialName("pause-on-focus-change") PauseOnFocusChange }

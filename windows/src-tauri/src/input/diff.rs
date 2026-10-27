@@ -88,27 +88,27 @@ mod tests {
     #[test]
     fn emoji_are_counted_as_two_code_units_and_never_split() {
         // 😀 is one scalar (4 UTF-8 bytes) but two UTF-16 code units.
-        let delta = delta("a😀", "a😀b");
+        let edit = delta("a😀", "a😀b");
         assert_eq!(
-            delta,
+            edit,
             Delta {
                 backspaces: 0,
                 suffix: "b".to_string()
             }
         );
 
-        let delta = delta("a😀", "a");
+        let edit = delta("a😀", "a");
         assert_eq!(
-            delta,
+            edit,
             Delta {
                 backspaces: 2,
                 suffix: String::new()
             }
         );
 
-        let delta = delta("😀😀", "😀🙂");
+        let edit = delta("😀😀", "😀🙂");
         assert_eq!(
-            delta,
+            edit,
             Delta {
                 backspaces: 2,
                 suffix: "🙂".to_string()
