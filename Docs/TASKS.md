@@ -234,7 +234,7 @@
 
 ## TASK-003a 实施与验证记录（配对协议）
 
-状态：代码与共享样例已改完，**待 CI 验证**；CI 通过前不得视为完成。
+状态：已完成。CI 40468263703 全绿：Android debug/release 构建、Lint、10 项单元测试；Windows 前端检查、Clippy、14 项 Rust 测试、NSIS 打包；两端已发布 test.14（`VoiceBridge-14.apk` / `VoiceBridge-14-setup.exe` + `.sig` + 清单）。
 
 已实现：
 - 新增 4 类配对消息：`pair.request`、`pair.challenge`、`pair.confirm`、`pair.result`（`status` 为 `paired/rejected/expired/mismatch/busy`）。
@@ -244,9 +244,10 @@
 - PROTOCOL.md 增加配对章节与配对码（SAS）计算规则；PRD/ARCHITECTURE/SECURITY 同步为「mDNS 发现 + 数字比对」。
 
 未验证 / 风险：
-- 未编译、未运行测试；CI 结果未知。
-- 配对码计算、TLS、凭据存储、设备发现均未实现，本轮只定义数据形状。
-- `pair.result` 的 `token` 为可选字段：显式 `null` 与缺省在两端都视为「无 token」。
+- 本轮只定义数据形状：配对码计算、TLS、凭据存储、设备发现均未实现。
+- `pair.result` 的 `token` 为可选字段：显式 `null` 与缺省在两端都视为「无 token」，已由跨端样例覆盖。
+- 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
+- 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
 ## 用户追加：Android 测试版应用内更新（随 TASK-000 交付）
 
