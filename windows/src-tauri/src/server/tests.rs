@@ -104,16 +104,16 @@ fn unsupported_message_types_are_never_authorized() {
 fn rejections_use_protocol_error_codes() {
     let oversized = vec![b' '; protocol::MAX_MESSAGE_BYTES + 1];
     assert_eq!(
-        protocol::decode(&oversized).unwrap_err(),
-        ErrorCode::MessageTooLarge
+        protocol::decode(&oversized).err(),
+        Some(ErrorCode::MessageTooLarge)
     );
     assert_eq!(
-        protocol::decode(b"not-json").unwrap_err(),
-        ErrorCode::InvalidMessage
+        protocol::decode(b"not-json").err(),
+        Some(ErrorCode::InvalidMessage)
     );
     assert_eq!(
-        protocol::decode(br#"{"v":2,"type":"hello"}"#).unwrap_err(),
-        ErrorCode::UnsupportedProtocol
+        protocol::decode(br#"{"v":2,"type":"hello"}"#).err(),
+        Some(ErrorCode::UnsupportedProtocol)
     );
 }
 
