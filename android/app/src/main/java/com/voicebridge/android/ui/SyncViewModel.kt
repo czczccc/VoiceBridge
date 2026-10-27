@@ -1,10 +1,12 @@
 package com.voicebridge.android.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.voicebridge.android.BuildConfig
+import com.voicebridge.android.input.AutoSegment
 import com.voicebridge.android.input.SnapshotGate
 import com.voicebridge.android.network.BridgeClient
 import com.voicebridge.android.network.BridgeConnectionState
@@ -21,11 +23,8 @@ import kotlinx.coroutines.launch
 /** 30-80 ms is the documented range; the exact window is a build-time setting. */
 private val SNAPSHOT_WINDOW_MILLIS = BuildConfig.SNAPSHOT_WINDOW_MS
 
-/**
- * A pause this long means the segment is finished: the PC keeps the text and the field is cleared
- * for the next one. Shorter than an IME's late rewrite, long enough not to interrupt dictation.
- */
-private const val AUTO_COMMIT_MILLIS = 3_000L
+private const val SETTINGS_PREFERENCES = "voicebridge-settings"
+private const val AUTO_SEGMENT_KEY = "autoSegmentMillis"
 
 /**
  * Connects the paired PC to the text field.
@@ -43,6 +42,22 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _session = MutableStateFlow<BridgeSession?>(null)
     val session: StateFlow<BridgeSession?> = _session.asStateFlow()
+
+    private val preferences =
+        application.getSharedPreferences(SETTINGS_PREFERENCES, Context.MODE_PRIVATE)
+
+    /**
+     * How long a pause ends the current segment, or 0 to wait for the user's explicit end. Stored in
+     * milliseconds and validated on read.
+     */
+    private val _autoSegmentMillis = MutableStateFlow(
+        AutoSegment.coerce(preferences.getLong(AUTO_SEGMENT_KEY, AutoSegment.DEFAULT)),
+    )
+    val autoSegmentMillis: StateFlow<Long> = _autoSegmentMillis.asStateFlow()
+
+    /** A user pause keeps the draft and the connection but stops sending snapshots. */
+    private val _pausedByUser = MutableStateFlow(false)
+    val pausedByUser: StateFlow<Boolean> = _pausedByUser.asStateFlow()
 
     private val gate = SnapshotGate(
         windowMillis = SNAPSHOT_WINDOW_MILLIS,
@@ -93,6 +108,7 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         textJob = viewModelScope.launch {
             // revision is the single "something changed" signal; value carries the payload it names.
             model.revision.collect {
+                if (_pausedByUser.value) return@collect
                 val current = model.value.value
                 gate.onText(current.text, current.protocolSelection())
                 segmentSent = true
@@ -101,11 +117,47 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Changes when a pause ends the segment; 0 means only the user's buttons end it. */
+    fun setAutoSegmentMillis(value: Long) {
+        val millis = AutoSegment.coerce(value)
+        if (_autoSegmentMillis.value == millis) return
+        _autoSegmentMillis.value = millis
+        preferences.edit().putLong(AUTO_SEGMENT_KEY, millis).apply()
+        if (millis == 0L) {
+            autoCommit?.cancel()
+            autoCommit = null
+        } else if (segmentSent && _session.value != null && !_pausedByUser.value) {
+            scheduleAutoCommit()
+        }
+    }
+
+    /**
+     * Stops or resumes forwarding. Pausing flushes what is already pending (so the PC keeps the
+     * words spoken before the tap) and keeps the draft; resuming sends the whole current text, so
+     * every edit made while paused arrives at once.
+     */
+    fun setPausedByUser(paused: Boolean) {
+        if (_pausedByUser.value == paused) return
+        _pausedByUser.value = paused
+        autoCommit?.cancel()
+        autoCommit = null
+        if (paused) {
+            if (_session.value != null) gate.flush() else gate.reset()
+            return
+        }
+        val current = text?.value?.value ?: return
+        if (current.text.isEmpty() && !segmentSent) return
+        segmentSent = true
+        gate.sendNow(current.text, current.protocolSelection())
+        if (current.text.isNotEmpty()) scheduleAutoCommit()
+    }
+
     /**
      * Ends the segment on purpose: the PC keeps what it already has, the field is cleared, and the
      * next keystroke arms a fresh session so the next segment is appended after it.
      */
     fun finishSegment() {
+        if (_pausedByUser.value) return
         autoCommit?.cancel()
         autoCommit = null
         if (!segmentSent) return
@@ -126,15 +178,21 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         text?.clearWithoutSync()
     }
 
-    /** A pause ends the segment automatically; the user does not have to press anything. */
+    /** A pause ends the segment automatically; 0 disables this and waits for the user. */
     private fun scheduleAutoCommit() {
         autoCommit?.cancel()
+        autoCommit = null
+        if (_pausedByUser.value) return
+        val delayMillis = _autoSegmentMillis.value
+        if (delayMillis <= 0L) return
         autoCommit = viewModelScope.launch {
-            delay(AUTO_COMMIT_MILLIS)
+            delay(delayMillis)
             autoCommit = null
             // If the PC never armed a session (refused target, auto sync off) or is currently
             // paused on another window, the text stays put: clearing it would lose the draft.
-            if (_session.value != null && bridge?.paused?.value != true) finishSegment()
+            if (_session.value != null && bridge?.paused?.value != true && !_pausedByUser.value) {
+                finishSegment()
+            }
         }
     }
 
@@ -161,7 +219,7 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         // needs the full text before the user's next keystroke.
         gate.reset()
         val current = text?.value?.value
-        if (session != null && current != null) {
+        if (session != null && current != null && !_pausedByUser.value) {
             gate.sendNow(current.text, current.protocolSelection())
         }
     }
@@ -170,6 +228,7 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         autoCommit?.cancel()
         autoCommit = null
         segmentSent = false
+        _pausedByUser.value = false
         bridgeScope?.cancel()
         bridgeScope = null
         bridge?.stop()

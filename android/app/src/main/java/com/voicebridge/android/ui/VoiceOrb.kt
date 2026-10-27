@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.voicebridge.android.R
 
-internal enum class OrbMode { Idle, Connecting, Active, Error }
+internal enum class OrbMode { Idle, Connecting, Active, Paused, Error }
 
 /**
  * The centerpiece: a soft gradient sphere that encodes connection state.
@@ -44,12 +44,14 @@ internal fun VoiceOrb(diameter: Dp, mode: OrbMode, onClick: () -> Unit) {
         OrbMode.Active -> 900
         OrbMode.Connecting -> 1_200
         OrbMode.Idle -> 2_600
+        OrbMode.Paused -> 2_000
         OrbMode.Error -> 1_800
     }
     val targetScale = when (mode) {
         OrbMode.Active -> 1.035f
         OrbMode.Connecting -> 1.06f
         OrbMode.Idle -> 1.012f
+        OrbMode.Paused -> 1f
         OrbMode.Error -> 1f
     }
     val scale by transition.animateFloat(
@@ -64,6 +66,7 @@ internal fun VoiceOrb(diameter: Dp, mode: OrbMode, onClick: () -> Unit) {
         OrbMode.Active -> listOf(Color(0xFF5C87FF), Color(0xFFAFC6FF), Color(0xFFF7FAFF))
         OrbMode.Connecting -> listOf(Color(0xFF93B2FF), Color(0xFFD5E2FF), Color(0xFFFFFFFF))
         OrbMode.Idle -> listOf(Color(0xFF7FA5FF), Color(0xFFCEDCFF), Color(0xFFFBFBFA))
+        OrbMode.Paused -> listOf(Color(0xFFB9C3D6), Color(0xFFDDE3EE), Color(0xFFFBFBFA))
         OrbMode.Error -> listOf(Color(0xFFFF8A80), Color(0xFFFFCFCB), Color(0xFFFFF8F7))
     }
     val label = stringResource(
@@ -71,6 +74,7 @@ internal fun VoiceOrb(diameter: Dp, mode: OrbMode, onClick: () -> Unit) {
             OrbMode.Active -> R.string.voice_orb_active
             OrbMode.Connecting -> R.string.voice_orb_connecting
             OrbMode.Idle -> R.string.voice_orb_idle
+            OrbMode.Paused -> R.string.voice_orb_paused
             OrbMode.Error -> R.string.voice_orb_error
         },
     )

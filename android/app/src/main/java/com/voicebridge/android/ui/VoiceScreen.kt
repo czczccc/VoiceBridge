@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,11 +38,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -49,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,6 +86,7 @@ fun VoiceScreen(
     val value by input.value.collectAsStateWithLifecycle()
     val syncState by sync.state.collectAsStateWithLifecycle()
     val session by sync.session.collectAsStateWithLifecycle()
+    val paused by sync.pausedByUser.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val density = LocalDensity.current
@@ -92,6 +98,7 @@ fun VoiceScreen(
         keyboard?.show()
     }
     val mode = when {
+        paused -> OrbMode.Paused
         syncState is BridgeConnectionState.Error -> OrbMode.Error
         session != null -> OrbMode.Active
         syncState is BridgeConnectionState.Connecting ||
@@ -140,8 +147,35 @@ fun VoiceScreen(
                 ) { SlidersGlyph() }
             }
 
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                VoiceStatus(stored = stored, state = syncState, session = session)
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = if (stored != null) 64.dp else 0.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    VoiceStatus(
+                        stored = stored,
+                        state = syncState,
+                        session = session,
+                        paused = paused,
+                    )
+                }
+                if (stored != null) {
+                    TextButton(
+                        onClick = { sync.setPausedByUser(!paused) },
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (paused) R.string.voice_resume else R.string.voice_pause,
+                            ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
             }
             if (stored == null) {
                 Text(
@@ -186,20 +220,27 @@ fun VoiceScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val paired = stored != null
+                val canFinish = !paused && value.text.isNotEmpty()
+                val leading: (@Composable () -> Unit)? = if (paired) {
+                    { KeyboardGlyph() }
+                } else {
+                    null
+                }
                 Pill(
                     label = stringResource(
                         if (paired) R.string.voice_continue else R.string.voice_pair_action,
                     ),
                     onClick = if (paired) continueSpeaking else onOpenSettings,
                     modifier = Modifier.weight(1f),
+                    leading = leading,
                 )
                 Pill(
                     label = stringResource(R.string.input_new_segment),
-                    enabled = value.text.isNotEmpty(),
+                    enabled = canFinish,
                     onClick = sync::finishSegment,
                 )
                 EndButton(
-                    enabled = value.text.isNotEmpty(),
+                    enabled = canFinish,
                     onClick = sync::finishSegment,
                     label = stringResource(R.string.voice_end_segment),
                 )
@@ -257,14 +298,28 @@ private fun VoiceStatus(
     stored: StoredCredential?,
     state: BridgeConnectionState,
     session: BridgeSession?,
+    paused: Boolean,
 ) {
+    if (paused) {
+        Text(
+            text = stringResource(R.string.voice_status_paused),
+            style = MaterialTheme.typography.bodySmall,
+            color = Muted,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        return
+    }
     if (state is BridgeConnectionState.Error) {
         // Errors keep the detailed, actionable explanation from the shared status row.
         SyncStatusRow(stored = stored, state = state, session = session)
         return
     }
     val text = when {
-        session != null -> stringResource(R.string.voice_status_syncing)
+        session != null ->
+            stringResource(R.string.voice_status_syncing_to, session.targetLabel)
         state is BridgeConnectionState.Reconnecting ->
             stringResource(R.string.voice_status_reconnecting, state.attempt)
         state is BridgeConnectionState.Connected && stored != null ->
@@ -278,6 +333,9 @@ private fun VoiceStatus(
         style = MaterialTheme.typography.bodySmall,
         color = Muted,
         textAlign = TextAlign.Center,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
     )
 }
 
@@ -388,6 +446,7 @@ private fun Pill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    leading: (@Composable () -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -398,11 +457,48 @@ private fun Pill(
             .padding(horizontal = 18.dp, vertical = 13.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (enabled) Ink else Muted,
-            maxLines = 1,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (leading != null) {
+                leading()
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) Ink else Muted,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeyboardGlyph() {
+    Canvas(modifier = Modifier.size(18.dp)) {
+        val stroke = 1.6.dp.toPx()
+        drawRoundRect(
+            color = Ink,
+            topLeft = Offset(size.width * 0.04f, size.height * 0.2f),
+            size = Size(size.width * 0.92f, size.height * 0.58f),
+            cornerRadius = CornerRadius(3.dp.toPx()),
+            style = Stroke(width = stroke),
+        )
+        val dot = 1.1.dp.toPx()
+        listOf(0.25f, 0.5f, 0.75f).forEach { x ->
+            drawCircle(
+                color = Ink,
+                radius = dot,
+                center = Offset(size.width * x, size.height * 0.45f),
+            )
+        }
+        drawLine(
+            color = Ink,
+            start = Offset(size.width * 0.32f, size.height * 0.63f),
+            end = Offset(size.width * 0.68f, size.height * 0.63f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
         )
     }
 }
