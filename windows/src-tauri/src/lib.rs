@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tauri::{Manager, State};
 
+pub mod discovery;
 pub mod identity;
 pub mod pairing;
 pub mod protocol;

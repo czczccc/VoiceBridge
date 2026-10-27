@@ -11,6 +11,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::discovery::{self, Advertiser};
 use crate::identity::Identity;
 use crate::pairing::devices::{Device, DeviceStore};
 use crate::pairing::session::{
@@ -71,6 +72,7 @@ pub struct Server {
     port: u16,
     identity: StdMutex<Option<Arc<Identity>>>,
     pairing: StdMutex<Option<Arc<PairingManager>>>,
+    advert: StdMutex<Option<Advertiser>>,
     devices: Arc<Mutex<DeviceStore>>,
 }
 
@@ -87,6 +89,7 @@ impl Server {
             port,
             identity: StdMutex::new(None),
             pairing: StdMutex::new(None),
+            advert: StdMutex::new(None),
             devices: Arc::new(Mutex::new(devices)),
         }
     }
@@ -217,6 +220,7 @@ impl Server {
     }
 
     pub async fn stop(&self) -> Status {
+        self.stop_advertising();
         let running = self.state.lock().await.take();
         match running {
             Some(running) => {
@@ -228,6 +232,37 @@ impl Server {
             None => self.sink.record("stop-ignored reason=not-running"),
         }
         Status::stopped(self.fingerprint())
+    }
+}
+
+impl Server {
+    /// Best effort: a machine without a usable LAN address still serves loopback.
+    fn advertise(&self, port: u16) {
+        let Some(fingerprint) = self.fingerprint() else {
+            return;
+        };
+        let Some(address) = primary_lan_ip() else {
+            self.sink.record("mdns-skipped reason=no-lan-address");
+            return;
+        };
+        let device_id = local_device_id(&fingerprint);
+        let properties = discovery::properties(&device_id, &local_device_name(), &fingerprint);
+        let instance = format!("VoiceBridge-{device_id}");
+        match Advertiser::start(&instance, port, address, properties) {
+            Ok(advertiser) => {
+                if let Ok(mut slot) = self.advert.lock() {
+                    *slot = Some(advertiser);
+                }
+                self.sink.record("mdns-advertising");
+            }
+            Err(error) => self.sink.record(&format!("mdns-failed reason={error}")),
+        }
+    }
+
+    fn stop_advertising(&self) {
+        if let Ok(mut slot) = self.advert.lock() {
+            *slot = None;
+        }
     }
 }
 

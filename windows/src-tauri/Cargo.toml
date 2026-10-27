@@ -24,6 +24,7 @@ tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "sync", "tim
 tokio-tungstenite = "0.29.0"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 futures-util = "0.3.34"
+mdns-sd = "0.21"
 base64 = "0.22"
 rand = "0.8"
 rcgen = "0.14"
