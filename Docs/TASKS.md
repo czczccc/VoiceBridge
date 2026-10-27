@@ -53,14 +53,22 @@
 
 ## TASK-003：配对与安全连接
 **目标**
-- 实现一次性配对码/二维码、证书指纹校验、设备授权列表与撤销。
-- Android 凭据使用安全存储。
+- mDNS 自动发现（Windows 广播、Android 浏览），手动输入地址作为兜底。
+- 实现一次性配对会话、证书指纹校验、蓝牙式 6 位数字码核对、设备授权列表与撤销。
+- Android 凭据使用 Android Keystore 安全存储。
 - 实现 WSS 与连接认证。
 
+**拆分**
+- 003a：PROTOCOL.md、两端配对消息模型、共享样例与测试。
+- 003b：证书生成、WSS、持久连接与服务循环重写、nonce/配对码计算、token 存储。
+- 003c：mDNS 发现、两端配对 UI、设备列表与撤销、手动地址兜底。
+
 **验收**
-- 正确配对成功。
+- 正确配对成功；两端显示的配对码一致。
+- 配对码不一致时用户可拒绝，服务器返回 `mismatch` 且不发放 token。
 - 错误指纹、错误令牌、过期 nonce 和撤销设备均失败。
-- 配对码过期后不能复用。
+- 配对码过期后不能复用；并发配对返回 `busy`。
+- 已配对设备重连无需再次确认，撤销后立即失效。
 - 未实现安全认证前，不得开放生产 LAN 输入注入。
 
 ## TASK-004：Android 输入法文本框
@@ -223,6 +231,22 @@
 - 未在 Windows 实机点击启动/停止，未用真实客户端验证端口释放。
 - 服务目前无 TLS、无认证，仅限本机回环；不能作为局域网正式方案。
 - 端口 47615 固定，若被占用会报错，暂不支持自定义端口。
+
+## TASK-003a 实施与验证记录（配对协议）
+
+状态：代码与共享样例已改完，**待 CI 验证**；CI 通过前不得视为完成。
+
+已实现：
+- 新增 4 类配对消息：`pair.request`、`pair.challenge`、`pair.confirm`、`pair.result`（`status` 为 `paired/rejected/expired/mismatch/busy`）。
+- 两端同时实现字段校验：nonce/token 为无填充 base64url（nonce 16–86 字符，token 32–128），`certFingerprint` 固定 `SHA256:` + 64 位小写十六进制，`expiresAt` 非负整数。
+- `pair.result` 只有 `paired` 可携带 token；其它状态携带 token，或 `paired` 缺 token，均为 INVALID_MESSAGE。
+- 共享样例扩展到 12 条正常消息、27 条非法消息；两端新增编码侧测试，覆盖 token 与状态绑定。
+- PROTOCOL.md 增加配对章节与配对码（SAS）计算规则；PRD/ARCHITECTURE/SECURITY 同步为「mDNS 发现 + 数字比对」。
+
+未验证 / 风险：
+- 未编译、未运行测试；CI 结果未知。
+- 配对码计算、TLS、凭据存储、设备发现均未实现，本轮只定义数据形状。
+- `pair.result` 的 `token` 为可选字段：显式 `null` 与缺省在两端都视为「无 token」。
 
 ## 用户追加：Android 测试版应用内更新（随 TASK-000 交付）
 

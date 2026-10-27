@@ -323,5 +323,106 @@
       "authenticated": "true"
     },
     "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "short-client-nonce",
+    "message": {
+      "v": 1,
+      "type": "pair.request",
+      "messageId": "m9",
+      "sentAt": 1780000000000,
+      "deviceId": "android-device-id",
+      "deviceName": "Pixel 7",
+      "clientVersion": "0.1.0",
+      "clientNonce": "abc"
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "padded-server-nonce",
+    "message": {
+      "v": 1,
+      "type": "pair.challenge",
+      "messageId": "m10",
+      "sentAt": 1780000000000,
+      "pairingId": "pairing-1",
+      "serverDeviceId": "windows-device-id",
+      "serverName": "DESKTOP-ABC",
+      "serverNonce": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB==",
+      "certFingerprint": "SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "expiresAt": 1780000120000
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "malformed-certificate-fingerprint",
+    "message": {
+      "v": 1,
+      "type": "pair.challenge",
+      "messageId": "m10",
+      "sentAt": 1780000000000,
+      "pairingId": "pairing-1",
+      "serverDeviceId": "windows-device-id",
+      "serverName": "DESKTOP-ABC",
+      "serverNonce": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "certFingerprint": "SHA256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef",
+      "expiresAt": 1780000120000
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "quoted-pair-confirm",
+    "message": {
+      "v": 1,
+      "type": "pair.confirm",
+      "messageId": "m11",
+      "sentAt": 1780000000000,
+      "pairingId": "pairing-1",
+      "confirmed": "true"
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "paired-without-token",
+    "message": {
+      "v": 1,
+      "type": "pair.result",
+      "messageId": "m12",
+      "sentAt": 1780000000000,
+      "pairingId": "pairing-1",
+      "status": "paired",
+      "serverDeviceId": "windows-device-id",
+      "serverName": "DESKTOP-ABC"
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "token-on-rejection",
+    "message": {
+      "v": 1,
+      "type": "pair.result",
+      "messageId": "m12",
+      "sentAt": 1780000000000,
+      "pairingId": "pairing-1",
+      "status": "rejected",
+      "token": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "serverDeviceId": "windows-device-id",
+      "serverName": "DESKTOP-ABC"
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "unknown-pair-status",
+    "message": {
+      "v": 1,
+      "type": "pair.result",
+      "messageId": "m12",
+      "sentAt": 1780000000000,
+      "pairingId": "pairing-1",
+      "status": "approved",
+      "serverDeviceId": "windows-device-id",
+      "serverName": "DESKTOP-ABC"
+    },
+    "error": "INVALID_MESSAGE"
   }
 ]

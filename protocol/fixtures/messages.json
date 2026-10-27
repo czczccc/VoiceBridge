@@ -6,5 +6,9 @@
   {"v":1,"type":"text.ack","messageId":"m5","sentAt":1780000000000,"sessionId":"session-1","seq":42,"status":"applied","latencyMs":34},
   {"v":1,"type":"session.stop","messageId":"m6","sentAt":1780000000000,"sessionId":"session-1","reason":"user"},
   {"v":1,"type":"clipboard.text","messageId":"m7","sentAt":1780000000000,"eventId":"event-1","originDeviceId":"android-device-id","direction":"android-to-windows","text":"测试剪切板"},
-  {"v":1,"type":"error","messageId":"m8","sentAt":1780000000000,"code":"FOCUS_CHANGED","message":"输入焦点发生变化，已暂停同步"}
+  {"v":1,"type":"error","messageId":"m8","sentAt":1780000000000,"code":"FOCUS_CHANGED","message":"输入焦点发生变化，已暂停同步"},
+  {"v":1,"type":"pair.request","messageId":"m9","sentAt":1780000000000,"deviceId":"android-device-id","deviceName":"Pixel 7","clientVersion":"0.1.0","clientNonce":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+  {"v":1,"type":"pair.challenge","messageId":"m10","sentAt":1780000000000,"pairingId":"pairing-1","serverDeviceId":"windows-device-id","serverName":"DESKTOP-ABC","serverNonce":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","certFingerprint":"SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","expiresAt":1780000120000},
+  {"v":1,"type":"pair.confirm","messageId":"m11","sentAt":1780000000000,"pairingId":"pairing-1","confirmed":true},
+  {"v":1,"type":"pair.result","messageId":"m12","sentAt":1780000000000,"pairingId":"pairing-1","status":"paired","token":"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC","serverDeviceId":"windows-device-id","serverName":"DESKTOP-ABC"}
 ]

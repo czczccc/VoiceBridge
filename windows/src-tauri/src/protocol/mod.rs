@@ -97,6 +97,44 @@ pub enum Body {
     },
     #[serde(rename = "error")]
     Error { code: ErrorCode, message: String },
+    #[serde(rename = "pair.request", rename_all = "camelCase")]
+    PairRequest {
+        device_id: String,
+        device_name: String,
+        client_version: String,
+        client_nonce: String,
+    },
+    #[serde(rename = "pair.challenge", rename_all = "camelCase")]
+    PairChallenge {
+        pairing_id: String,
+        server_device_id: String,
+        server_name: String,
+        server_nonce: String,
+        cert_fingerprint: String,
+        expires_at: u64,
+    },
+    #[serde(rename = "pair.confirm", rename_all = "camelCase")]
+    PairConfirm { pairing_id: String, confirmed: bool },
+    #[serde(rename = "pair.result", rename_all = "camelCase")]
+    PairResult {
+        pairing_id: String,
+        status: PairStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
+        server_device_id: String,
+        server_name: String,
+    },
+}
+
+/// Outcome of one pairing attempt. Only `paired` carries a credential.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PairStatus {
+    Paired,
+    Rejected,
+    Expired,
+    Mismatch,
+    Busy,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +214,35 @@ fn range(text: &str, range: &TextRange, ordered: bool) -> Result<(), ErrorCode> 
     valid(boundary(range.start) && boundary(range.end) && (!ordered || range.start <= range.end))
 }
 
+/// Nonces and tokens travel as unpadded base64url. Reject any other alphabet or size.
+fn base64url(value: &str, minimum: usize, maximum: usize) -> Result<(), ErrorCode> {
+    valid(
+        (minimum..=maximum).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'),
+    )
+}
+
+fn nonce(value: &str) -> Result<(), ErrorCode> {
+    base64url(value, 16, 86)
+}
+
+fn token(value: &str) -> Result<(), ErrorCode> {
+    base64url(value, 32, 128)
+}
+
+/// `SHA256:` plus 64 lowercase hex digits. The UI inserts the colons for display.
+fn fingerprint(value: &str) -> Result<(), ErrorCode> {
+    let hex = value.strip_prefix("SHA256:").unwrap_or("");
+    valid(
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+    )
+}
+
 impl Message {
     pub fn validate(&self) -> Result<(), ErrorCode> {
         if self.v != VERSION {
@@ -250,6 +317,52 @@ impl Message {
             }
             Body::Error { message, .. } => {
                 valid(!message.trim().is_empty() && message.len() <= 1024)?;
+            }
+            Body::PairRequest {
+                device_id,
+                device_name,
+                client_version,
+                client_nonce,
+            } => {
+                short(device_id)?;
+                short(device_name)?;
+                short(client_version)?;
+                nonce(client_nonce)?;
+            }
+            Body::PairChallenge {
+                pairing_id,
+                server_device_id,
+                server_name,
+                server_nonce,
+                cert_fingerprint,
+                expires_at,
+            } => {
+                short(pairing_id)?;
+                short(server_device_id)?;
+                short(server_name)?;
+                nonce(server_nonce)?;
+                fingerprint(cert_fingerprint)?;
+                valid(*expires_at <= MAX_INTEGER)?;
+            }
+            Body::PairConfirm { pairing_id, .. } => {
+                short(pairing_id)?;
+            }
+            Body::PairResult {
+                pairing_id,
+                status,
+                token: credential,
+                server_device_id,
+                server_name,
+            } => {
+                short(pairing_id)?;
+                short(server_device_id)?;
+                short(server_name)?;
+                match (status, credential) {
+                    (PairStatus::Paired, Some(credential)) => token(credential)?,
+                    (PairStatus::Paired, None) => return Err(ErrorCode::InvalidMessage),
+                    (_, Some(_)) => return Err(ErrorCode::InvalidMessage),
+                    (_, None) => (),
+                }
             }
         }
         Ok(())

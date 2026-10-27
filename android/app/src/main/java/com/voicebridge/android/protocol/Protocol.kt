@@ -58,6 +58,36 @@ sealed class Body {
 
     @Serializable @SerialName("error")
     class Error(val code: ErrorCode, val message: String) : Body()
+
+    @Serializable @SerialName("pair.request")
+    class PairRequest(
+        val deviceId: String, val deviceName: String,
+        val clientVersion: String, val clientNonce: String,
+    ) : Body()
+
+    @Serializable @SerialName("pair.challenge")
+    class PairChallenge(
+        val pairingId: String, val serverDeviceId: String, val serverName: String,
+        val serverNonce: String, val certFingerprint: String, val expiresAt: Long,
+    ) : Body()
+
+    @Serializable @SerialName("pair.confirm")
+    class PairConfirm(val pairingId: String, val confirmed: Boolean) : Body()
+
+    @Serializable @SerialName("pair.result")
+    class PairResult(
+        val pairingId: String, val status: PairStatus, val token: String? = null,
+        val serverDeviceId: String, val serverName: String,
+    ) : Body()
+}
+
+@Serializable
+enum class PairStatus {
+    @SerialName("paired") Paired,
+    @SerialName("rejected") Rejected,
+    @SerialName("expired") Expired,
+    @SerialName("mismatch") Mismatch,
+    @SerialName("busy") Busy,
 }
 
 @Serializable class Auth(val token: String)
@@ -126,6 +156,25 @@ object Protocol {
         requireValid(boundary(range.start) && boundary(range.end) && (!ordered || range.start <= range.end))
     }
 
+    /** Nonces and tokens travel as unpadded base64url; reject any other alphabet or size. */
+    private fun base64url(value: String, minimum: Int, maximum: Int) {
+        requireValid(value.length in minimum..maximum && value.all {
+            it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '-' || it == '_'
+        })
+    }
+
+    private fun nonce(value: String) = base64url(value, 16, 86)
+
+    private fun token(value: String) = base64url(value, 32, 128)
+
+    /** `SHA256:` plus 64 lowercase hex digits; the UI inserts the colons for display. */
+    private fun fingerprint(value: String) {
+        requireValid(
+            value.startsWith("SHA256:") && value.length == 71 &&
+                value.substring(7).all { it in '0'..'9' || it in 'a'..'f' },
+        )
+    }
+
     fun validate(message: Message) {
         if (message.v != PROTOCOL_VERSION) throw ProtocolException(ErrorCode.UNSUPPORTED_PROTOCOL)
         short(message.messageId)
@@ -153,6 +202,34 @@ object Protocol {
             is Body.SessionStop -> { short(body.sessionId); short(body.reason) }
             is Body.ClipboardText -> { short(body.eventId); short(body.originDeviceId) }
             is Body.Error -> requireValid(body.message.isNotBlank() && body.message.toByteArray(Charsets.UTF_8).size <= 1024)
+            is Body.PairRequest -> {
+                short(body.deviceId)
+                short(body.deviceName)
+                short(body.clientVersion)
+                nonce(body.clientNonce)
+            }
+            is Body.PairChallenge -> {
+                short(body.pairingId)
+                short(body.serverDeviceId)
+                short(body.serverName)
+                nonce(body.serverNonce)
+                fingerprint(body.certFingerprint)
+                number(body.expiresAt)
+            }
+            is Body.PairConfirm -> short(body.pairingId)
+            is Body.PairResult -> {
+                short(body.pairingId)
+                short(body.serverDeviceId)
+                short(body.serverName)
+                when (body.status) {
+                    PairStatus.Paired -> {
+                        val credential = body.token
+                            ?: throw ProtocolException(ErrorCode.INVALID_MESSAGE)
+                        token(credential)
+                    }
+                    else -> requireValid(body.token == null)
+                }
+            }
         }
     }
 
@@ -170,7 +247,11 @@ object Protocol {
             for (key in listOf(
                 "type", "deviceId", "clientVersion", "serverVersion", "connectionId", "sessionId",
                 "text", "status", "reason", "eventId", "originDeviceId", "direction", "code", "message",
+                "deviceName", "clientNonce", "pairingId", "serverDeviceId", "serverName",
+                "serverNonce", "certFingerprint",
             )) root[key]?.let { string(it) }
+            // `token` is optional; an explicit null must mean "absent" on both ends.
+            root["token"]?.takeUnless { it is JsonNull }?.let { string(it) }
             root["auth"]?.let { string(it.jsonObject["token"]) }
             root["target"]?.let {
                 string(it.jsonObject["windowLabel"])
@@ -178,8 +259,9 @@ object Protocol {
             }
             root["capabilities"]?.let { it.jsonArray.forEach { capability -> string(capability) } }
             root["authenticated"]?.let { boolean(it) }
+            root["confirmed"]?.let { boolean(it) }
             // Reject quoted, fractional and out-of-range integer payloads before decoding.
-            for (key in listOf("seq", "latencyMs")) root[key]?.let { long(it) }
+            for (key in listOf("seq", "latencyMs", "expiresAt")) root[key]?.let { long(it) }
             for (key in listOf("selection", "composition")) {
                 root[key]?.takeUnless { it is JsonNull }?.let {
                     long(it.jsonObject["start"])

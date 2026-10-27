@@ -55,6 +55,13 @@ class ProtocolTest {
             listOf("sessionId", "reason"),
             listOf("eventId", "originDeviceId", "direction", "text"),
             listOf("code", "message"),
+            listOf("deviceId", "deviceName", "clientVersion", "clientNonce"),
+            listOf(
+                "pairingId", "serverDeviceId", "serverName", "serverNonce",
+                "certFingerprint", "expiresAt",
+            ),
+            listOf("pairingId", "confirmed"),
+            listOf("pairingId", "status", "serverDeviceId", "serverName"),
         )
         for ((message, required) in fixture("messages.json").zip(fields)) {
             for (field in listOf("v", "type", "messageId", "sentAt") + required) {
@@ -90,6 +97,32 @@ class ProtocolTest {
         rejects(ErrorCode.INVALID_MESSAGE) { read(JsonObject(base + ("text" to JsonPrimitive(123)))) }
         rejects(ErrorCode.INVALID_MESSAGE) { Protocol.decode("not json".toByteArray()) }
         rejects(ErrorCode.INVALID_MESSAGE) { Protocol.decode(byteArrayOf(0xff.toByte())) }
+    }
+
+    @Test
+    fun onlyPairedResultsCarryACredential() {
+        fun message(body: Body) = Message(1, "m", 0, body)
+        fun result(status: PairStatus, token: String?) =
+            Body.PairResult("pairing-1", status, token, "windows-device", "DESKTOP")
+        val credential = "C".repeat(43)
+
+        Protocol.encode(message(result(PairStatus.Paired, credential)))
+        for (status in listOf(
+            PairStatus.Rejected, PairStatus.Expired, PairStatus.Mismatch, PairStatus.Busy,
+        )) {
+            Protocol.encode(message(result(status, null)))
+            rejects(ErrorCode.INVALID_MESSAGE) {
+                Protocol.encode(message(result(status, credential)))
+            }
+        }
+        rejects(ErrorCode.INVALID_MESSAGE) {
+            Protocol.encode(message(result(PairStatus.Paired, null)))
+        }
+        for (bad in listOf("$credential=", "not/valid+token")) {
+            rejects(ErrorCode.INVALID_MESSAGE) {
+                Protocol.encode(message(result(PairStatus.Paired, bad)))
+            }
+        }
     }
 
     @Test

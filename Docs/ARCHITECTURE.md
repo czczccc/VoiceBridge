@@ -35,7 +35,7 @@ flowchart TD
 - OkHttp WebSocket 或 Ktor Client（二选一，MVP 统一使用一个）
 - Android Keystore 保存设备凭据
 - DataStore 保存设置
-- mDNS/NsdManager 可后置；MVP 支持扫码/输入 IP
+- NsdManager 浏览 mDNS 服务自动发现 Windows；手动输入 IP 作为发现失败时的兜底。
 
 ### Windows
 - Tauri 2
@@ -174,7 +174,10 @@ MVP 先限制目标场景为“会话开始时光标位于输入末尾，用户�
 
 - Windows Rust 端提供 WebSocket 服务。
 - 只绑定用户明确选择的私有 LAN 接口/地址；默认拒绝公网接口和不必要的 IPv6 公网监听。
-- 初版可由用户扫码确认 Windows IP/端口；mDNS 自动发现后置。
+- Windows 广播 `_voicebridge._tcp.local` 并监听用户设定的端口；Android 用 `NsdManager` 浏览发现，无需手输 IP。
+- 发现结果（含 mDNS 中广播的证书指纹）**未认证**，只能用于定位候选设备，不能作为信任依据。
+- 配对在已建立的 TLS 连接上完成：两端各自根据证书指纹与两个 nonce 计算同一个 6 位配对码，用户核对一致后两端确认，服务器再发放长期 token。
+- 无法接收广播的网络（AP 隔离、部分公司 Wi-Fi）允许手动输入地址，配对流程不变。
 - 配对完成后要求认证；未知设备握手失败。
 - 每条消息校验协议版本、长度上限、sessionId、seq 与消息类型。
 - 断线采用指数退避重连，随机抖动并设置最大等待。

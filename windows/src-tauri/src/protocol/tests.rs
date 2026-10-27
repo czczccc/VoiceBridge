@@ -45,6 +45,17 @@ fn every_required_field_is_required() {
         vec!["sessionId", "reason"],
         vec!["eventId", "originDeviceId", "direction", "text"],
         vec!["code", "message"],
+        vec!["deviceId", "deviceName", "clientVersion", "clientNonce"],
+        vec![
+            "pairingId",
+            "serverDeviceId",
+            "serverName",
+            "serverNonce",
+            "certFingerprint",
+            "expiresAt",
+        ],
+        vec!["pairingId", "confirmed"],
+        vec!["pairingId", "status", "serverDeviceId", "serverName"],
     ];
     for (message, required) in fixtures().into_iter().zip(fields) {
         for field in ["v", "type", "messageId", "sentAt"]
@@ -98,6 +109,49 @@ fn sequence_and_utf16_boundaries() {
     message["selection"] = Value::Null;
     message["composition"] = json!({"start":4,"end":2});
     assert_eq!(read(&message).err(), Some(ErrorCode::InvalidMessage));
+}
+
+#[test]
+fn only_paired_results_carry_a_credential() {
+    let base = |status: PairStatus, credential: Option<String>| Body::PairResult {
+        pairing_id: "pairing-1".to_string(),
+        status,
+        token: credential,
+        server_device_id: "windows-device-id".to_string(),
+        server_name: "DESKTOP-ABC".to_string(),
+    };
+    let message = |body: Body| Message {
+        v: VERSION,
+        message_id: "m".to_string(),
+        sent_at: 0,
+        body,
+    };
+    let credential = || Some("C".repeat(43));
+
+    assert!(encode(&message(base(PairStatus::Paired, credential()))).is_ok());
+    for status in [
+        PairStatus::Rejected,
+        PairStatus::Expired,
+        PairStatus::Mismatch,
+        PairStatus::Busy,
+    ] {
+        assert!(encode(&message(base(status, None))).is_ok());
+        assert_eq!(
+            encode(&message(base(status, credential()))).err(),
+            Some(ErrorCode::InvalidMessage)
+        );
+    }
+    assert_eq!(
+        encode(&message(base(PairStatus::Paired, None))).err(),
+        Some(ErrorCode::InvalidMessage)
+    );
+    // A padded or non-base64url credential must never round-trip.
+    for bad in ["C".repeat(43) + "=", "not/valid+token".to_string()] {
+        assert_eq!(
+            encode(&message(base(PairStatus::Paired, Some(bad)))).err(),
+            Some(ErrorCode::InvalidMessage)
+        );
+    }
 }
 
 #[test]

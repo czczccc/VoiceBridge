@@ -22,7 +22,7 @@ Android ↔ Windows 局域网实时语音输入与剪切板同步工具。
 
 ## MVP 范围
 
-1. Android 与 Windows 在同一局域网配对并连接。
+1. Android 与 Windows 通过 mDNS 自动发现，并在两端核对同一 6 位数字码后配对连接。
 2. Android 文本框正常调用用户当前输入法。
 3. 手机文本变化通过 WebSocket 实时发送完整快照。
 4. Windows 在用户明确启动的输入会话中，将文本差异注入当前焦点。
