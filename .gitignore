@@ -1,0 +1,24 @@
+# Dependencies and build output
+windows/node_modules/
+windows/dist/
+windows/src-tauri/target/
+windows/src-tauri/gen/
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/update-release/
+
+# Local settings and secrets
+.idea/
+.vscode/
+*.iml
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+
+# OS files
+.DS_Store
+Thumbs.db

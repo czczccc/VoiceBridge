@@ -1,0 +1,174 @@
+name: Build apps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    env:
+      VOICEBRIDGE_VERSION_CODE: ${{ github.run_number }}
+      VOICEBRIDGE_VERSION_NAME: 0.1.0-test.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and check debug baseline
+        run: bash ./gradlew --no-daemon --stacktrace assembleDebug lintDebug testDebugUnitTest
+      - name: Prepare stable testing signature
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Configure Android signing secrets using scripts/setup-android-signing.ps1."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/android-testing.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/android-testing.jks" >> "$GITHUB_ENV"
+      - name: Build signed testing APK
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash ./gradlew --no-daemon --stacktrace assembleRelease lintRelease testReleaseUnitTest
+      - name: Prepare update manifest
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          code = int(os.environ['VOICEBRIDGE_VERSION_CODE'])
+          output = Path('update-release')
+          output.mkdir()
+          name = f'VoiceBridge-{code}.apk'
+          apk = Path('app/build/outputs/apk/release/app-release.apk').read_bytes()
+          (output / name).write_bytes(apk)
+          manifest = {
+              'schemaVersion': 1,
+              'versionCode': code,
+              'versionName': os.environ['VOICEBRIDGE_VERSION_NAME'],
+              'apkUrl': f'https://github.com/${{ github.repository }}/releases/download/android-testing/{name}',
+              'sha256': hashlib.sha256(apk).hexdigest(),
+              'size': len(apk),
+          }
+          (output / 'update.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - name: Upload signed update files
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-update-release
+          path: android/update-release/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/android-testing.jks"
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voicebridge-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-check-reports
+          path: android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  publish-android:
+    name: Publish Android testing update
+    needs: [android, windows]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-update-release
+          path: update-release
+      - name: Publish testing channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view android-testing > /dev/null 2>&1; then
+            gh release create android-testing --target "$GITHUB_SHA" --prerelease --title "Android testing" --notes "Development builds for device testing. Not a stable release."
+          fi
+          # Versioned APK first, manifest last: an interrupted upload preserves the previous update.
+          gh release upload android-testing update-release/*.apk --clobber
+          gh release upload android-testing update-release/update.json --clobber
+
+  windows:
+    name: Windows x64 installer
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows/src-tauri -> target
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Check frontend formatting and types
+        run: |
+          npm run format:check
+          npm run check
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Build application and installer
+        run: npm run tauri -- build --bundles nsis --ci -- --locked
+      - name: Check Rust warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: voicebridge-windows-x64
+          path: windows/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

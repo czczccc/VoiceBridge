@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VoiceBridge</string>
+    <string name="tagline">手机输入，电脑接续。</string>
+    <string name="welcome">欢迎使用</string>
+    <string name="baseline_message">应用已启动。设备配对、语音文本同步与剪切板功能将在后续版本提供。</string>
+</resources>
