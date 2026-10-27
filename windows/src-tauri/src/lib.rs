@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use tauri::State;
 
+pub mod identity;
+pub mod pairing;
 pub mod protocol;
 pub mod server;
 
