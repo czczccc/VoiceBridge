@@ -14,13 +14,14 @@ use super::log::MemorySink;
 use super::{Server, MAX_CONNECTIONS};
 use crate::identity::Identity;
 use crate::pairing::devices::DeviceStore;
-use crate::protocol::{self, Body, ErrorCode, Message};
+use crate::protocol::{self, Body, ErrorCode, Message, PairStatus};
 
 type Client = tokio_tungstenite::WebSocketStream<TlsStream<TcpStream>>;
 
 struct Fixture {
     server: Server,
     certificate: CertificateDer<'static>,
+    fingerprint: String,
     sink: Arc<MemorySink>,
     directory: PathBuf,
 }
@@ -40,6 +41,7 @@ fn fixture() -> Fixture {
     ));
     let identity = Identity::load_or_create(&directory).expect("identity");
     let certificate = identity.certificate();
+    let fingerprint = identity.fingerprint().to_string();
     let devices = DeviceStore::load(directory.join("devices.json")).expect("devices");
     let sink = Arc::new(MemorySink::default());
     let server = Server::with_port(sink.clone(), devices, 0);
@@ -47,6 +49,7 @@ fn fixture() -> Fixture {
     Fixture {
         server,
         certificate,
+        fingerprint,
         sink,
         directory,
     }
@@ -126,6 +129,34 @@ fn text_snapshot(text: &str) -> Vec<u8> {
         },
     })
     .expect("snapshot encodes")
+}
+
+fn pair_request(device_id: &str, device_name: &str) -> Vec<u8> {
+    protocol::encode(&Message {
+        v: protocol::VERSION,
+        message_id: "m-pair-request".to_string(),
+        sent_at: 1,
+        body: Body::PairRequest {
+            device_id: device_id.to_string(),
+            device_name: device_name.to_string(),
+            client_version: "0.1.0".to_string(),
+            client_nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+        },
+    })
+    .expect("pair request encodes")
+}
+
+fn pair_confirm(pairing_id: &str, confirmed: bool) -> Vec<u8> {
+    protocol::encode(&Message {
+        v: protocol::VERSION,
+        message_id: "m-pair-confirm".to_string(),
+        sent_at: 1,
+        body: Body::PairConfirm {
+            pairing_id: pairing_id.to_string(),
+            confirmed,
+        },
+    })
+    .expect("pair confirm encodes")
 }
 
 async fn next_body(socket: &mut Client) -> Body {
@@ -250,7 +281,11 @@ async fn revoked_devices_lose_access_immediately() {
         .authorize_device("android-1", "Pixel 7", &token(), 1)
         .await
         .expect("authorize");
-    assert!(fixture.server.revoke_device("android-1").await.expect("revoke"));
+    assert!(fixture
+        .server
+        .revoke_device("android-1")
+        .await
+        .expect("revoke"));
     let address = fixture.start().await;
 
     let mut socket = fixture.connect(&address).await;
@@ -267,7 +302,10 @@ async fn stopping_releases_the_port_and_is_idempotent() {
     let fixture = fixture();
     let stopped = fixture.server.status().await;
     assert!(!stopped.running);
-    assert!(stopped.fingerprint.is_some(), "identity is exposed to the UI");
+    assert!(
+        stopped.fingerprint.is_some(),
+        "identity is exposed to the UI"
+    );
 
     let running = fixture.server.start(false).await.expect("start");
     assert!(running.running);
@@ -289,19 +327,106 @@ async fn stopping_releases_the_port_and_is_idempotent() {
 }
 
 #[tokio::test]
-async fn lan_listening_stays_closed_until_discovery_ships() {
+async fn lan_listening_is_an_explicit_opt_in() {
     let fixture = fixture();
-    let error = fixture.server.start(true).await.expect_err("lan refused");
-    assert!(error.contains("配对"));
-    assert!(!fixture.server.status().await.running);
+    let status = fixture.server.start(true).await.expect("lan allowed");
+    assert!(status.running);
+    assert!(status.lan_supported);
+    assert!(status.port.is_some());
+    fixture.server.stop().await;
+    assert!(!fixture.server.status().await.lan_supported);
+}
+
+#[tokio::test]
+async fn approved_pairing_issues_a_token_that_can_authenticate() {
+    let fixture = fixture();
+    let address = fixture.start().await;
+
+    let mut socket = fixture.connect(&address).await;
+    socket
+        .send(WsMessage::Binary(
+            pair_request("android-1", "Pixel 7").into(),
+        ))
+        .await
+        .expect("send pair request");
+    let pairing_id = match next_body(&mut socket).await {
+        Body::PairChallenge {
+            pairing_id,
+            cert_fingerprint,
+            ..
+        } => {
+            assert_eq!(cert_fingerprint, fixture.fingerprint);
+            pairing_id
+        }
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    };
+
+    let pending = fixture.server.pending_pairing().expect("pending");
+    assert_eq!(pending.device_name, "Pixel 7");
+    fixture.server.decide_pairing(true).await.expect("approve");
+
+    socket
+        .send(WsMessage::Binary(pair_confirm(&pairing_id, true).into()))
+        .await
+        .expect("send pair confirm");
+    let token = match next_body(&mut socket).await {
+        Body::PairResult {
+            status: PairStatus::Paired,
+            token: Some(token),
+            ..
+        } => token,
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    };
+
+    // The token is the credential: a fresh connection authenticates with it.
+    let mut authenticated = fixture.connect(&address).await;
+    authenticated
+        .send(WsMessage::Binary(hello("android-1", &token).into()))
+        .await
+        .expect("send hello");
+    match next_body(&mut authenticated).await {
+        Body::HelloAck { authenticated, .. } => assert!(authenticated),
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    }
+    fixture.server.stop().await;
+}
+
+#[tokio::test]
+async fn denied_pairing_issues_no_token() {
+    let fixture = fixture();
+    let address = fixture.start().await;
+
+    let mut socket = fixture.connect(&address).await;
+    socket
+        .send(WsMessage::Binary(
+            pair_request("android-1", "Pixel 7").into(),
+        ))
+        .await
+        .expect("send pair request");
+    let pairing_id = match next_body(&mut socket).await {
+        Body::PairChallenge { pairing_id, .. } => pairing_id,
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    };
+    fixture.server.decide_pairing(false).await.expect("deny");
+    socket
+        .send(WsMessage::Binary(pair_confirm(&pairing_id, true).into()))
+        .await
+        .expect("send pair confirm");
+    match next_body(&mut socket).await {
+        Body::PairResult { status, token, .. } => {
+            assert_eq!(status, PairStatus::Rejected);
+            assert!(token.is_none());
+        }
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    }
+    assert!(fixture.server.list_devices().await.is_empty());
+    fixture.server.stop().await;
 }
 
 #[tokio::test]
 async fn service_refuses_to_start_without_an_identity() {
-    let directory = std::env::temp_dir().join(format!(
-        "voicebridge-no-identity-{}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("voicebridge-no-identity-{}", std::process::id()));
     let devices = DeviceStore::load(directory.join("devices.json")).expect("devices");
     let server = Server::with_port(Arc::new(MemorySink::default()), devices, 0);
     let error = server.start(false).await.expect_err("identity required");

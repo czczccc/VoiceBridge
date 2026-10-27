@@ -28,7 +28,11 @@ export function ServerPanel() {
         </div>
         <div>
           <dt>局域网访问</dt>
-          <dd>未开放（需先完成设备配对与加密认证）</dd>
+          <dd>
+            {status?.lanSupported
+              ? "已开放（所有网卡，需要 Windows 防火墙放行）"
+              : "未开放（仅本机回环）"}
+          </dd>
         </div>
         <div>
           <dt>证书指纹</dt>
@@ -43,7 +47,7 @@ export function ServerPanel() {
       </dl>
       {!running && status ? (
         <p className="hint">
-          当前只监听本机回环地址，仅用于本机调试。未认证的明文端口不会对局域网开放。
+          当前只监听本机回环地址。点「允许局域网访问」后手机才能发现本机，配对仍需在本页确认。
         </p>
       ) : null}
       {error ? (
@@ -65,7 +69,7 @@ export function ServerPanel() {
           type="button"
           onClick={startLan}
           disabled={busy || running}
-          title="设备配对与加密认证完成后开放"
+          title="需要手机在同一局域网，并放行 Windows 防火墙"
         >
           允许局域网访问
         </button>

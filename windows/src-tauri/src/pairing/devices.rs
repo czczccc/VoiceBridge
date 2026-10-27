@@ -198,8 +198,12 @@ mod tests {
     fn reauthorizing_replaces_the_previous_token() {
         let path = temporary_path_for_store();
         let mut store = DeviceStore::load(path.clone()).unwrap();
-        store.authorize("android-1", "Pixel 7", &"E".repeat(43), 1).unwrap();
-        store.authorize("android-1", "Pixel 7", &"F".repeat(43), 2).unwrap();
+        store
+            .authorize("android-1", "Pixel 7", &"E".repeat(43), 1)
+            .unwrap();
+        store
+            .authorize("android-1", "Pixel 7", &"F".repeat(43), 2)
+            .unwrap();
         assert_eq!(store.list().len(), 1);
         assert!(!store.is_authorized("android-1", &"E".repeat(43)));
         assert!(store.is_authorized("android-1", &"F".repeat(43)));

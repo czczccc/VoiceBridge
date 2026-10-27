@@ -9,6 +9,7 @@ pub mod server;
 
 use identity::Identity;
 use pairing::devices::{Device, DeviceStore};
+use pairing::session::PendingPairing;
 use server::{Server, Status};
 
 /// What the UI may see. The stored token digest never leaves the backend.
@@ -66,6 +67,18 @@ async fn revoke_device(server: State<'_, Arc<Server>>, device_id: String) -> Res
     server.revoke_device(&device_id).await
 }
 
+/// The pairing request the local user has to approve, if one is waiting.
+#[tauri::command]
+async fn pairing_pending(server: State<'_, Arc<Server>>) -> Result<Option<PendingPairing>, String> {
+    Ok(server.pending_pairing())
+}
+
+/// Records the local Allow/Deny decision. Never accepts a token from the caller.
+#[tauri::command]
+async fn pairing_decide(server: State<'_, Arc<Server>>, accept: bool) -> Result<(), String> {
+    server.decide_pairing(accept).await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -93,7 +106,9 @@ pub fn run() {
             stop_server,
             local_fingerprint,
             list_devices,
-            revoke_device
+            revoke_device,
+            pairing_pending,
+            pairing_decide
         ])
         .run(tauri::generate_context!())
         .expect("VoiceBridge failed to start");

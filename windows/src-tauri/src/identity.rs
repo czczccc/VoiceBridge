@@ -143,7 +143,9 @@ mod tests {
     fn assert_fingerprint(value: &str) {
         let hex = value.strip_prefix("SHA256:").expect("prefix");
         assert_eq!(hex.len(), 64);
-        assert!(hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        assert!(hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
     }
 
     #[test]

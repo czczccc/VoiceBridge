@@ -1,7 +1,7 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -13,7 +13,10 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::identity::Identity;
 use crate::pairing::devices::{Device, DeviceStore};
-use crate::protocol::{self, Body, ErrorCode, Message};
+use crate::pairing::session::{
+    now_millis, ClientConfirm, PairOutcome, PairingManager, PendingPairing, PAIRING_TTL_MS,
+};
+use crate::protocol::{self, Body, ErrorCode, Message, PairStatus};
 
 pub mod log;
 pub mod tls;
@@ -23,7 +26,7 @@ pub use log::LogSink;
 pub const DEFAULT_PORT: u16 = 47615;
 const MAX_CONNECTIONS: usize = 8;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
-/// Long enough for the user to compare and confirm a pairing code.
+/// Long enough for the user to approve a pairing request.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -53,19 +56,21 @@ impl Status {
 
 struct Running {
     addr: SocketAddr,
+    lan: bool,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<()>,
 }
 
-/// Owns the listener and the authorization state.
+/// Owns the listener, the local identity and the authorization state.
 ///
-/// The service is WSS-only: there is no plaintext mode, because a plaintext port
-/// would let any device on the network read and inject text.
+/// The service is WSS-only: a plaintext port would let any device on the network
+/// read and inject text.
 pub struct Server {
     state: Mutex<Option<Running>>,
     sink: Arc<dyn LogSink>,
     port: u16,
     identity: StdMutex<Option<Arc<Identity>>>,
+    pairing: StdMutex<Option<Arc<PairingManager>>>,
     devices: Arc<Mutex<DeviceStore>>,
 }
 
@@ -81,12 +86,22 @@ impl Server {
             sink,
             port,
             identity: StdMutex::new(None),
+            pairing: StdMutex::new(None),
             devices: Arc::new(Mutex::new(devices)),
         }
     }
 
-    /// Loads the certificate identity. Without it the service refuses to start.
+    /// Loads the certificate identity and derives the local pairing device id from it.
+    /// Without an identity the service refuses to start.
     pub fn set_identity(&self, identity: Identity) {
+        let fingerprint = identity.fingerprint().to_string();
+        let device_id = local_device_id(&fingerprint);
+        let name = local_device_name();
+        let manager = PairingManager::new(self.devices.clone(), device_id, name);
+        match self.pairing.lock() {
+            Ok(mut slot) => *slot = Some(Arc::new(manager)),
+            Err(_) => self.sink.record("pairing-lock-failed"),
+        }
         match self.identity.lock() {
             Ok(mut slot) => *slot = Some(Arc::new(identity)),
             Err(_) => self.sink.record("identity-lock-failed"),
@@ -94,36 +109,26 @@ impl Server {
     }
 
     pub fn fingerprint(&self) -> Option<String> {
-        self.identity
-            .lock()
-            .ok()
-            .and_then(|slot| slot.as_ref().map(|identity| identity.fingerprint().to_string()))
+        self.identity.lock().ok().and_then(|slot| {
+            slot.as_ref()
+                .map(|identity| identity.fingerprint().to_string())
+        })
+    }
+
+    fn pairing(&self) -> Option<Arc<PairingManager>> {
+        self.pairing.lock().ok().and_then(|slot| slot.clone())
     }
 
     pub async fn status(&self) -> Status {
         let fingerprint = self.fingerprint();
         match self.state.lock().await.as_ref() {
-            Some(running) => running_status(running.addr, fingerprint),
+            Some(running) => running_status(running.addr, running.lan, fingerprint),
             None => Status::stopped(fingerprint),
         }
     }
 
     pub async fn list_devices(&self) -> Vec<Device> {
         self.devices.lock().await.list().to_vec()
-    }
-
-    pub async fn authorize_device(
-        &self,
-        device_id: &str,
-        name: &str,
-        token: &str,
-        now: u64,
-    ) -> Result<(), String> {
-        self.devices
-            .lock()
-            .await
-            .authorize(device_id, name, token, now)
-            .map_err(|_| "无法保存设备授权".to_string())
     }
 
     pub async fn revoke_device(&self, device_id: &str) -> Result<bool, String> {
@@ -134,28 +139,47 @@ impl Server {
             .map_err(|_| "无法保存设备授权".to_string())
     }
 
-    /// Loopback only. LAN exposure stays closed until discovery and the pairing
-    /// confirmation UI exist (TASK-003c); an unreachable pairing flow must not
-    /// leave an open port.
+    /// The request the local user must approve, if any.
+    pub fn pending_pairing(&self) -> Option<PendingPairing> {
+        self.pairing()?.pending()
+    }
+
+    /// Records the local Allow/Deny decision. Idempotent when nothing is pending.
+    pub async fn decide_pairing(&self, accepted: bool) -> Result<(), String> {
+        let Some(pairing) = self.pairing() else {
+            return Err("配对功能尚未就绪".to_string());
+        };
+        pairing
+            .local_decision(accepted)
+            .await
+            .map_err(|_| "无法保存配对决定".to_string())
+    }
+
+    /// Starts the WSS listener. `allow_lan` is an explicit, per-session opt-in:
+    /// without it the service only listens on loopback.
     pub async fn start(&self, allow_lan: bool) -> Result<Status, String> {
         let identity = self.identity.lock().ok().and_then(|slot| slot.clone());
         let mut state = self.state.lock().await;
         if let Some(running) = state.as_ref() {
-            return Ok(running_status(running.addr, self.fingerprint()));
-        }
-        if allow_lan {
-            return Err(
-                "局域网监听需要先完成设备配对界面与自动发现，当前仅开放本机回环地址".to_string(),
-            );
+            return Ok(running_status(
+                running.addr,
+                running.lan,
+                self.fingerprint(),
+            ));
         }
         let identity = identity.ok_or("本机证书尚未生成，无法启动加密服务")?;
         let acceptor = tls::acceptor(&identity)?;
 
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, self.port))
+        let bind_ip = if allow_lan {
+            Ipv4Addr::UNSPECIFIED
+        } else {
+            Ipv4Addr::LOCALHOST
+        };
+        let listener = TcpListener::bind((bind_ip, self.port))
             .await
             .map_err(|error| {
                 self.sink.record(&format!("bind-failed port={}", self.port));
-                format!("无法监听本机端口（{}）", error.kind())
+                format!("无法监听端口（{}）", error.kind())
             })?;
         let addr = listener
             .local_addr()
@@ -168,14 +192,28 @@ impl Server {
             self.sink.clone(),
             acceptor,
             self.devices.clone(),
+            self.pairing(),
+            identity.fingerprint().to_string(),
         ));
-        self.sink.record(&format!("started addr={addr}"));
+        self.sink
+            .record(&format!("started bind={} lan={allow_lan}", addr.ip()));
+        let reported = if allow_lan {
+            SocketAddr::new(
+                primary_lan_ip()
+                    .map(IpAddr::V4)
+                    .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                addr.port(),
+            )
+        } else {
+            addr
+        };
         *state = Some(Running {
-            addr,
+            addr: reported,
+            lan: allow_lan,
             shutdown,
             task,
         });
-        Ok(running_status(addr, self.fingerprint()))
+        Ok(running_status(reported, allow_lan, self.fingerprint()))
     }
 
     pub async fn stop(&self) -> Status {
@@ -193,13 +231,39 @@ impl Server {
     }
 }
 
-fn running_status(addr: SocketAddr, fingerprint: Option<String>) -> Status {
+fn running_status(addr: SocketAddr, lan: bool, fingerprint: Option<String>) -> Status {
     Status {
         running: true,
         address: Some(addr.ip().to_string()),
         port: Some(addr.port()),
-        lan_supported: false,
+        lan_supported: lan,
         fingerprint,
+    }
+}
+
+/// Stable id derived from the certificate fingerprint, so it survives restarts
+/// without another file to keep in sync.
+fn local_device_id(fingerprint: &str) -> String {
+    let hex = fingerprint.strip_prefix("SHA256:").unwrap_or(fingerprint);
+    let prefix: String = hex.chars().take(16).collect();
+    format!("windows-{prefix}")
+}
+
+fn local_device_name() -> String {
+    match std::env::var("COMPUTERNAME") {
+        Ok(name) if !name.trim().is_empty() => name,
+        _ => "Windows".to_string(),
+    }
+}
+
+/// Best-effort private address for display. UDP connect sends no packets; it only
+/// asks the routing table which local address would be used.
+fn primary_lan_ip() -> Option<Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect("192.0.2.1:9").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
+        _ => None,
     }
 }
 
@@ -209,6 +273,8 @@ async fn accept_loop(
     sink: Arc<dyn LogSink>,
     acceptor: TlsAcceptor,
     devices: Arc<Mutex<DeviceStore>>,
+    pairing: Option<Arc<PairingManager>>,
+    fingerprint: String,
 ) {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     tokio::pin!(shutdown);
@@ -227,8 +293,10 @@ async fn accept_loop(
                     let sink = sink.clone();
                     let acceptor = acceptor.clone();
                     let devices = devices.clone();
+                    let pairing = pairing.clone();
+                    let fingerprint = fingerprint.clone();
                     tokio::spawn(async move {
-                        serve_connection(stream, acceptor, sink, devices).await;
+                        serve_connection(stream, acceptor, sink, devices, pairing, fingerprint).await;
                         drop(permit);
                     });
                 }
@@ -242,21 +310,13 @@ async fn accept_loop(
     drop(listener);
 }
 
-/// What to do after one inbound frame.
-enum Decision {
-    /// Accept the handshake and keep the connection.
-    Acknowledged,
-    /// Answer with an error but keep the connection usable.
-    Refused(ErrorCode),
-    /// Answer with an error and close the connection.
-    Closed(ErrorCode),
-}
-
 async fn serve_connection(
     stream: TcpStream,
     acceptor: TlsAcceptor,
     sink: Arc<dyn LogSink>,
     devices: Arc<Mutex<DeviceStore>>,
+    pairing: Option<Arc<PairingManager>>,
+    fingerprint: String,
 ) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(protocol::MAX_MESSAGE_BYTES))
@@ -282,7 +342,7 @@ async fn serve_connection(
         }
     };
 
-    // Device id of the authenticated peer. `None` means only `hello` is allowed.
+    // Device id of the authenticated peer. `None` means only pairing and `hello` are allowed.
     let mut authenticated: Option<String> = None;
 
     loop {
@@ -306,68 +366,165 @@ async fn serve_connection(
             Ok(message) => message,
             Err(code) => {
                 sink.record(&format!("frame-rejected code={code:?}"));
-                let _ = socket.send(WsMessage::Binary(error_frame(code).into())).await;
+                let _ = socket
+                    .send(WsMessage::Binary(error_frame(code).into()))
+                    .await;
                 break;
             }
         };
+        sink.record(&format!("frame-handled type={}", kind(&message.body)));
 
-        let decision = decide(&devices, &mut authenticated, &message).await;
-        sink.record(&format!(
-            "frame-handled type={} result={}",
-            kind(&message.body),
-            label(&decision)
-        ));
-        match decision {
-            Decision::Acknowledged => {
-                let Some(frame) = acknowledgement() else {
-                    break;
-                };
-                if socket.send(WsMessage::Binary(frame.into())).await.is_err() {
-                    break;
+        let closing = match &message.body {
+            Body::Hello {
+                device_id, auth, ..
+            } => {
+                if authenticated.is_some() {
+                    send(&mut socket, error_frame(ErrorCode::InvalidMessage)).await
+                } else if authorize(&devices, device_id, &auth.token).await {
+                    authenticated = Some(device_id.clone());
+                    send(&mut socket, acknowledgement()).await
+                } else {
+                    let _ = socket
+                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
+                        .await;
+                    true
                 }
             }
-            Decision::Refused(code) => {
-                if socket
-                    .send(WsMessage::Binary(error_frame(code).into()))
-                    .await
-                    .is_err()
-                {
-                    break;
+            Body::PairRequest {
+                device_id,
+                device_name,
+                ..
+            } => {
+                if authenticated.is_some() {
+                    send(&mut socket, error_frame(ErrorCode::InvalidMessage)).await
+                } else if let Some(pairing) = pairing.as_ref() {
+                    match pairing.begin(device_id, device_name) {
+                        Ok(challenge) => {
+                            let frame = encode_body(Body::PairChallenge {
+                                pairing_id: challenge.pairing_id,
+                                server_device_id: pairing.server_device_id().to_string(),
+                                server_name: pairing.server_name().to_string(),
+                                server_nonce: challenge.server_nonce,
+                                cert_fingerprint: fingerprint.clone(),
+                                expires_at: challenge.expires_at,
+                            });
+                            send(&mut socket, frame.unwrap_or_default()).await
+                        }
+                        Err(_) => {
+                            let _ = socket
+                                .send(WsMessage::Binary(
+                                    error_frame(ErrorCode::RateLimited).into(),
+                                ))
+                                .await;
+                            true
+                        }
+                    }
+                } else {
+                    let _ = socket
+                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
+                        .await;
+                    true
                 }
             }
-            Decision::Closed(code) => {
-                let _ = socket.send(WsMessage::Binary(error_frame(code).into())).await;
-                break;
+            Body::PairConfirm {
+                pairing_id,
+                confirmed,
+            } => {
+                if authenticated.is_some() {
+                    send(&mut socket, error_frame(ErrorCode::InvalidMessage)).await
+                } else if let Some(pairing) = pairing.as_ref() {
+                    let outcome = match pairing.client_confirm(pairing_id, *confirmed).await {
+                        ClientConfirm::Complete(outcome) => Some(outcome),
+                        ClientConfirm::Waiting(receiver) => {
+                            PairingManager::wait(receiver, Duration::from_millis(PAIRING_TTL_MS))
+                                .await
+                        }
+                        ClientConfirm::Stale => None,
+                    };
+                    let outcome = outcome.unwrap_or(PairOutcome::Expired);
+                    if matches!(outcome, PairOutcome::Expired) {
+                        pairing.expire(pairing_id);
+                    }
+                    let frame = encode_body(pair_result_frame(
+                        pairing_id,
+                        outcome,
+                        pairing.server_device_id(),
+                        pairing.server_name(),
+                    ));
+                    // The client reconnects and authenticates with the new token.
+                    let _ = socket
+                        .send(WsMessage::Binary(frame.unwrap_or_default().into()))
+                        .await;
+                    true
+                } else {
+                    let _ = socket
+                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
+                        .await;
+                    true
+                }
             }
+            _ => {
+                if authenticated.is_some() {
+                    send(&mut socket, error_frame(ErrorCode::SessionNotActive)).await
+                } else {
+                    let _ = socket
+                        .send(WsMessage::Binary(error_frame(ErrorCode::AuthFailed).into()))
+                        .await;
+                    true
+                }
+            }
+        };
+        if closing {
+            break;
         }
     }
     let _ = socket.close(None).await;
 }
 
-async fn decide(
-    devices: &Mutex<DeviceStore>,
-    authenticated: &mut Option<String>,
-    message: &Message,
-) -> Decision {
-    match &message.body {
-        Body::Hello {
-            device_id, auth, ..
-        } => {
-            if authenticated.is_some() {
-                return Decision::Refused(ErrorCode::InvalidMessage);
-            }
-            if devices.lock().await.is_authorized(device_id, &auth.token) {
-                *authenticated = Some(device_id.clone());
-                Decision::Acknowledged
-            } else {
-                Decision::Closed(ErrorCode::AuthFailed)
-            }
-        }
-        // Authentication is a precondition for everything else. Session and
-        // clipboard handling arrive with their own tasks.
-        _ => match authenticated {
-            Some(_) => Decision::Refused(ErrorCode::SessionNotActive),
-            None => Decision::Closed(ErrorCode::AuthFailed),
+async fn authorize(devices: &Mutex<DeviceStore>, device_id: &str, token: &str) -> bool {
+    let mut store = devices.lock().await;
+    let authorized = store.is_authorized(device_id, token);
+    if authorized {
+        // Best effort: a failure to persist "last seen" must not reject a valid token.
+        let _ = store.touch(device_id, now_millis());
+    }
+    authorized
+}
+
+async fn send(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_rustls::server::TlsStream<TcpStream>>,
+    frame: Vec<u8>,
+) -> bool {
+    socket.send(WsMessage::Binary(frame.into())).await.is_err()
+}
+
+fn pair_result_frame(
+    pairing_id: &str,
+    outcome: PairOutcome,
+    server_device_id: &str,
+    server_name: &str,
+) -> Body {
+    match outcome {
+        PairOutcome::Paired { token } => Body::PairResult {
+            pairing_id: pairing_id.to_string(),
+            status: PairStatus::Paired,
+            token: Some(token),
+            server_device_id: server_device_id.to_string(),
+            server_name: server_name.to_string(),
+        },
+        PairOutcome::Rejected => Body::PairResult {
+            pairing_id: pairing_id.to_string(),
+            status: PairStatus::Rejected,
+            token: None,
+            server_device_id: server_device_id.to_string(),
+            server_name: server_name.to_string(),
+        },
+        PairOutcome::Expired => Body::PairResult {
+            pairing_id: pairing_id.to_string(),
+            status: PairStatus::Expired,
+            token: None,
+            server_device_id: server_device_id.to_string(),
+            server_name: server_name.to_string(),
         },
     }
 }
@@ -390,14 +547,7 @@ fn kind(body: &Body) -> &'static str {
     }
 }
 
-fn label(decision: &Decision) -> String {
-    match decision {
-        Decision::Acknowledged => "ack".to_string(),
-        Decision::Refused(code) | Decision::Closed(code) => format!("{code:?}"),
-    }
-}
-
-fn acknowledgement() -> Option<Vec<u8>> {
+fn acknowledgement() -> Vec<u8> {
     encode_body(Body::HelloAck {
         server_version: SERVER_VERSION.to_string(),
         connection_id: format!("connection-{}", next_counter()),
@@ -408,6 +558,7 @@ fn acknowledgement() -> Option<Vec<u8>> {
         ],
         authenticated: true,
     })
+    .unwrap_or_default()
 }
 
 fn error_frame(code: ErrorCode) -> Vec<u8> {
@@ -433,13 +584,6 @@ fn next_counter() -> u64 {
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 /// Fixed, non-sensitive text only. Never echo client input.
 fn describe(code: ErrorCode) -> &'static str {
     match code {
@@ -447,7 +591,26 @@ fn describe(code: ErrorCode) -> &'static str {
         ErrorCode::MessageTooLarge => "消息超过长度上限",
         ErrorCode::UnsupportedProtocol => "不支持的协议版本",
         ErrorCode::SessionNotActive => "当前没有可由该设备使用的输入会话",
+        ErrorCode::RateLimited => "配对请求过于频繁或已有配对正在进行",
         _ => "消息无效",
+    }
+}
+
+#[cfg(test)]
+impl Server {
+    /// Seeds an authorized device without going through the pairing flow.
+    pub(crate) async fn authorize_device(
+        &self,
+        device_id: &str,
+        name: &str,
+        token: &str,
+        now: u64,
+    ) -> Result<(), String> {
+        self.devices
+            .lock()
+            .await
+            .authorize(device_id, name, token, now)
+            .map_err(|_| "无法保存设备授权".to_string())
     }
 }
 

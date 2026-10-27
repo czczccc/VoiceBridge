@@ -7,6 +7,7 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 
 pub mod devices;
+pub mod session;
 
 /// Domain separator for the numeric comparison code. Changing it invalidates
 /// every in-flight pairing, so it must stay stable.
