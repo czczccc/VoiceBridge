@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import com.voicebridge.android.R
 import com.voicebridge.android.network.BridgeConnectionState
+import com.voicebridge.android.protocol.ErrorCode
 import com.voicebridge.android.network.BridgeSession
 import com.voicebridge.android.pairing.StoredCredential
 
@@ -32,7 +33,13 @@ fun SyncStatusRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         }
         state is BridgeConnectionState.Error -> {
-            message = stringResource(R.string.sync_error, state.code.name)
+            message = when (state.code) {
+                ErrorCode.TARGET_UNAVAILABLE -> stringResource(R.string.sync_error_target)
+                ErrorCode.SESSION_NOT_ACTIVE -> stringResource(R.string.sync_error_disabled)
+                ErrorCode.AUTH_FAILED, ErrorCode.PAIRING_EXPIRED ->
+                    stringResource(R.string.sync_error_pairing)
+                else -> stringResource(R.string.sync_error, state.code.name)
+            }
             color = MaterialTheme.colorScheme.error
         }
         state is BridgeConnectionState.Connected && session != null -> {

@@ -249,6 +249,21 @@
 - 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
 - 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
+## 用户追加：无感自动开始输入会话
+
+用户要求电脑端不再需要点击「开始输入会话」：在电脑上点好输入框后，手机开始输入即自动同步；选择焦点属于用户在 Windows 上的操作，不由 VoiceBridge 完成。
+
+实现：
+- 手机在无活动会话时发送 `session.start`（`windowLabel = "auto"`），并缓存首个快照；服务器立即捕获当前前台窗口并广播权威 `session.start`，手机收到后补发缓存文本，因此开头字符不会丢失。
+- 服务器拒绝把 VoiceBridge 自身窗口作为目标，返回 `TARGET_UNAVAILABLE`；手机显示「请先在电脑上点选输入框」。同一失败在 2 秒内不重复请求。
+- 暂停/错误状态的会话可被新的输入重新武装；焦点变化与手动选区仍立即暂停。
+- Windows 面板改为只读状态 + 「关闭自动同步」开关 + 「停止当前会话」；关闭自动同步后手机请求返回 `SESSION_NOT_ACTIVE`。
+- 目标窗口进程号与应用自身 `std::process::id()` 比较，不依赖额外系统调用。
+
+未验证 / 风险：
+- 未编译、未运行；真机未验证「开始打字即自动开始」的时序与首字符完整性。
+- 自动开始意味着：如果用户在电脑上停留在密码框或非预期窗口，手机会直接写入该窗口；这是用户选择的模式，界面需持续提示先把焦点放对。
+
 ## TASK-005~007 实施与验证记录（快照发送与差异注入）
 
 状态：代码完成，**待 CI 验证**；端到端行为待真机测试。用户要求 005/006/007 合并为一次推送。
@@ -262,10 +277,9 @@
 
 已实现（TASK-006 Windows）：
 - `SessionManager` 状态机：`Armed → Active`，焦点变化或选区非空 → `PausedFocus` 并拒绝后续注入（须重新开始会话）；`stop` 立即清空。
-- 启动会话时延迟 3 秒再捕获前台窗口，让用户从 VoiceBridge 切到目标输入框；界面显示目标窗口标题。
+- 启动会话时捕获前台窗口（后续按用户要求改为手机发起、无需电脑点击，见「无感自动开始输入会话」）。
 - 快照校验：sessionId、seq 严格递增、已绑定设备、焦点句柄一致；失败分别返回 `rejected-session` / `stale` / `paused-focus` / `injection-error`。
-- `TextInjectionBackend` trait + `SendInputBackend`（Unicode 键事件，`
-` 转 Enter，`` 跳过），可注入假后端做测试。
+- `TextInjectionBackend` trait + `SendInputBackend`（Unicode 键事件，换行转 Enter，回车符跳过），可注入假后端做测试。
 
 已实现（TASK-007 Windows）：
 - `diff::delta` 用 UTF-16 code unit 求最长公共前缀，代理对不拆分；只回退变化尾部再输入新内容，**不使用 Ctrl+A 全选粘贴**。

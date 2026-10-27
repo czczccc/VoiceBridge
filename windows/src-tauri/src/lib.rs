@@ -90,10 +90,15 @@ async fn input_session_status(
     Ok(server.session_info())
 }
 
-/// Waits three seconds, then captures whatever window is in front and arms a session.
 #[tauri::command]
-async fn start_input_session(server: State<'_, Arc<Server>>) -> Result<SessionInfo, String> {
-    server.start_session().await
+async fn auto_sync_status(server: State<'_, Arc<Server>>) -> Result<bool, String> {
+    Ok(server.auto_sync())
+}
+
+/// Turns phone-initiated sessions on or off; disabling also stops the current session.
+#[tauri::command]
+async fn set_auto_sync(server: State<'_, Arc<Server>>, enabled: bool) -> Result<bool, String> {
+    Ok(server.set_auto_sync(enabled))
 }
 
 #[tauri::command]
@@ -132,7 +137,8 @@ pub fn run() {
             pairing_pending,
             pairing_decide,
             input_session_status,
-            start_input_session,
+            auto_sync_status,
+            set_auto_sync,
             stop_input_session
         ])
         .run(tauri::generate_context!())

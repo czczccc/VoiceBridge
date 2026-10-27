@@ -7,10 +7,12 @@ import com.voicebridge.android.protocol.AckStatus
 import com.voicebridge.android.protocol.Auth
 import com.voicebridge.android.protocol.Body
 import com.voicebridge.android.protocol.ErrorCode
+import com.voicebridge.android.protocol.FocusPolicy
 import com.voicebridge.android.protocol.Message
 import com.voicebridge.android.protocol.PROTOCOL_VERSION
 import com.voicebridge.android.protocol.Protocol
 import com.voicebridge.android.protocol.ProtocolException
+import com.voicebridge.android.protocol.Target
 import com.voicebridge.android.protocol.TextRange
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
@@ -90,6 +92,10 @@ class BridgeClient(
     private val sequencer = SnapshotSequencer()
     private var scope: CoroutineScope? = null
     private var socket: WebSocket? = null
+    /** Kept until the PC has armed a session, so the first characters are not lost. */
+    private var pendingSnapshot: Pair<String, TextRange?>? = null
+    private var sessionRequested = false
+    private var nextRequestAt = 0L
 
     /** Starts the connect loop; a second call while it runs does nothing. */
     fun start() {
@@ -124,8 +130,49 @@ class BridgeClient(
      * frame, so no network I/O blocks the UI.
      */
     fun sendSnapshot(text: String, selection: TextRange?) {
-        val failure = synchronized(lock) { sendLocked(text, selection) }
+        val failure = synchronized(lock) {
+            if (sequencer.session == null) {
+                // No session yet: buffer this text and ask the PC to arm one at its current
+                // focus. Typing is what starts a session; no click is needed on the PC.
+                pendingSnapshot = text to selection
+                requestSessionLocked()
+                null
+            } else {
+                sendLocked(text, selection)
+            }
+        }
         if (failure != null) publish(BridgeConnectionState.Error(failure))
+    }
+
+    /** Runs under [lock]. Asks once, then waits a moment before retrying a refused request. */
+    private fun requestSessionLocked() {
+        if (sessionRequested || now() < nextRequestAt) return
+        val target = socket ?: return
+        sessionRequested = true
+        // Two seconds is enough for a refusal to be read and shown, and keeps a burst of
+        // keystrokes from flooding the PC with requests.
+        nextRequestAt = now() + 2_000
+        val frame = try {
+            String(
+                Protocol.encode(
+                    message(
+                        Body.SessionStart(
+                            sessionId = "request-${randomBase64Url(6)}",
+                            target = Target("auto", FocusPolicy.PauseOnFocusChange),
+                        ),
+                    ),
+                ),
+                Charsets.UTF_8,
+            )
+        } catch (error: ProtocolException) {
+            Log.w(TAG, "A session request could not be encoded (${error.code})")
+            sessionRequested = false
+            return
+        }
+        if (!target.send(frame)) {
+            sessionRequested = false
+            Log.w(TAG, "A session request was dropped because the socket is closed")
+        }
     }
 
     /** Runs under [lock]. Returns the error to report, or null when nothing needs saying. */
@@ -237,7 +284,11 @@ class BridgeClient(
     }
 
     private fun forgetSession() {
-        synchronized(lock) { sequencer.clear() }
+        synchronized(lock) {
+            sequencer.clear()
+            pendingSnapshot = null
+            sessionRequested = false
+        }
         _session.value = null
     }
 
@@ -286,10 +337,24 @@ class BridgeClient(
                 attempt.helloAck.complete(true)
                 publish(BridgeConnectionState.Connected)
             }
-            is Body.SessionStart -> startSession(body)
+            is Body.SessionStart -> {
+                startSession(body)
+                // The buffered text was waiting for exactly this session.
+                val buffered = synchronized(lock) {
+                    sessionRequested = false
+                    pendingSnapshot.also { pendingSnapshot = null }
+                }
+                if (buffered != null) sendSnapshot(buffered.first, buffered.second)
+            }
             is Body.SessionStop -> endSession(body.sessionId)
             is Body.TextAck -> onAck(body)
             is Body.Error -> {
+                // Any refusal allows a later retry, but the buffered text is dropped: injecting
+                // it into whatever is focused minutes later would be worse than losing it.
+                synchronized(lock) {
+                    sessionRequested = false
+                    pendingSnapshot = null
+                }
                 Log.w(TAG, "The server reported ${body.code}")
                 publish(BridgeConnectionState.Error(body.code))
                 if (body.code in FATAL_CODES) {

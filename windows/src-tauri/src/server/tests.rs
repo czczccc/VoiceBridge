@@ -478,3 +478,104 @@ async fn connection_limit_is_enforced() {
     drop(idle);
     fixture.server.stop().await;
 }
+
+// ---------------------------------------------------------------------------
+// Auto-arming without a local click
+// ---------------------------------------------------------------------------
+
+use std::sync::atomic::AtomicBool;
+use std::sync::Mutex as StdMutex;
+
+use tokio::sync::broadcast;
+
+use crate::input::backend::{InjectError, TextInjectionBackend};
+use crate::input::focus::{FocusProbe, WindowTarget};
+use crate::session::SessionManager;
+
+struct NoopBackend;
+
+impl TextInjectionBackend for NoopBackend {
+    fn backspace(&self, _count: usize) -> Result<(), InjectError> {
+        Ok(())
+    }
+
+    fn type_text(&self, _text: &str) -> Result<(), InjectError> {
+        Ok(())
+    }
+}
+
+struct MovableFocus(StdMutex<Option<WindowTarget>>);
+
+impl FocusProbe for MovableFocus {
+    fn foreground(&self) -> Option<WindowTarget> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+fn movable(title: &str, handle: isize, process_id: u32) -> Arc<MovableFocus> {
+    Arc::new(MovableFocus(StdMutex::new(Some(WindowTarget {
+        handle,
+        process_id,
+        title: title.to_string(),
+    }))))
+}
+
+#[tokio::test]
+async fn auto_arming_refuses_our_own_window_and_a_disabled_switch() {
+    let focus = movable("VoiceBridge", 1, std::process::id());
+    let sessions = SessionManager::new(Arc::new(NoopBackend), focus.clone());
+    let (sender, _receiver) = broadcast::channel(4);
+    let enabled = AtomicBool::new(true);
+    assert_eq!(
+        super::arm_auto(&sessions, &enabled, &sender),
+        Err(ErrorCode::TargetUnavailable)
+    );
+
+    *focus.0.lock().unwrap() = Some(WindowTarget {
+        handle: 2,
+        process_id: std::process::id() + 1,
+        title: "Notepad".to_string(),
+    });
+    let disabled = AtomicBool::new(false);
+    assert_eq!(
+        super::arm_auto(&sessions, &disabled, &sender),
+        Err(ErrorCode::SessionNotActive)
+    );
+}
+
+#[tokio::test]
+async fn auto_arming_captures_the_focus_broadcasts_and_rearms_after_a_pause() {
+    let focus = movable("Notepad", 2, 4242);
+    let sessions = SessionManager::new(Arc::new(NoopBackend), focus.clone());
+    let (sender, mut receiver) = broadcast::channel(4);
+    let enabled = AtomicBool::new(true);
+
+    let info = super::arm_auto(&sessions, &enabled, &sender).expect("armed");
+    assert_eq!(info.target_label, "Notepad");
+    let frame = receiver.try_recv().expect("session.start is broadcast");
+    match protocol::decode(&frame).expect("frame decodes").body {
+        Body::SessionStart { session_id, target } => {
+            assert_eq!(session_id, info.session_id);
+            assert_eq!(target.window_label, "Notepad");
+        }
+        other => panic!("unexpected body kind: {:?}", std::mem::discriminant(&other)),
+    }
+
+    // A second request reuses the live session instead of moving the target.
+    let again = super::arm_auto(&sessions, &enabled, &sender).expect("reused");
+    assert_eq!(again.session_id, info.session_id);
+
+    // Losing focus pauses it, and the next request re-arms at the new window.
+    *focus.0.lock().unwrap() = Some(WindowTarget {
+        handle: 9,
+        process_id: 4243,
+        title: "Browser".to_string(),
+    });
+    assert_eq!(
+        sessions.apply("android-1", &info.session_id, 1, "x", None),
+        AckStatus::PausedFocus
+    );
+    let rearmed = super::arm_auto(&sessions, &enabled, &sender).expect("rearmed");
+    assert_ne!(rearmed.session_id, info.session_id);
+    assert_eq!(rearmed.target_label, "Browser");
+}

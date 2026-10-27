@@ -64,7 +64,9 @@ mDNS 广播内容（包括指纹）**未认证**，只用于定位候选设备�
 
 ### 3.2 `session.start`
 
-Windows 本地用户启动输入会话后，服务器创建 session：
+会话由**手机**在用户开始输入时发起：已认证客户端发送 `session.start`，`target.windowLabel` 可填 `"auto"`；服务器在当前前台窗口（排除 VoiceBridge 自身窗口）上创建 session，并以服务器版本广播同类型消息，携带真实窗口标题。服务器若无法捕获目标（焦点在 VoiceBridge 或没有前台窗口）则回 `TARGET_UNAVAILABLE`。
+
+以下为服务器广播的权威消息：
 ```json
 {
   "v": 1,

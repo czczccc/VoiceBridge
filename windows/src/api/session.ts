@@ -10,9 +10,13 @@ export function getInputSession(): Promise<InputSession | null> {
   return invoke<InputSession | null>("input_session_status");
 }
 
-/** Captures the foreground window after a three second delay. */
-export function startInputSession(): Promise<InputSession> {
-  return invoke<InputSession>("start_input_session");
+/** Whether the phone may arm a session without a local click. */
+export function getAutoSync(): Promise<boolean> {
+  return invoke<boolean>("auto_sync_status");
+}
+
+export function setAutoSync(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_auto_sync", { enabled });
 }
 
 export function stopInputSession(): Promise<string | null> {

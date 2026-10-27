@@ -77,6 +77,8 @@ pub struct Server {
     devices: Arc<Mutex<DeviceStore>>,
     sessions: Arc<SessionManager>,
     outbound: broadcast::Sender<Vec<u8>>,
+    /// When off, the phone cannot arm a session; the local user can still stop one.
+    auto_sync: Arc<AtomicBool>,
 }
 
 impl Server {
@@ -98,6 +100,7 @@ impl Server {
             devices: Arc::new(Mutex::new(devices)),
             sessions: Arc::new(SessionManager::new(backend, focus)),
             outbound,
+            auto_sync: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -169,22 +172,18 @@ impl Server {
         self.sessions.info()
     }
 
-    /// Arms a session against the window that is in front after a short delay, so the
-    /// user can move focus from this window to the real target before capture.
-    pub async fn start_session(&self) -> Result<SessionInfo, String> {
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        let Some(target) = self.sessions.foreground() else {
-            return Err("没有找到可输入的目标窗口，请先点击要输入的位置".to_string());
-        };
-        let info = self.sessions.start(target);
-        self.broadcast(Body::SessionStart {
-            session_id: info.session_id.clone(),
-            target: Target {
-                window_label: info.target_label.clone(),
-                focus_policy: FocusPolicy::PauseOnFocusChange,
-            },
-        });
-        Ok(info)
+    /// Whether the phone may arm a session without a local click.
+    pub fn auto_sync(&self) -> bool {
+        self.auto_sync.load(Ordering::Relaxed)
+    }
+
+    /// Turns auto-arming on or off. Turning it off also ends any running session.
+    pub fn set_auto_sync(&self, enabled: bool) -> bool {
+        self.auto_sync.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            self.stop_session();
+        }
+        enabled
     }
 
     pub fn stop_session(&self) -> Option<String> {
@@ -241,6 +240,7 @@ impl Server {
             pairing: self.pairing(),
             sessions: self.sessions.clone(),
             outbound: self.outbound.clone(),
+            auto_sync: self.auto_sync.clone(),
             fingerprint: identity.fingerprint().to_string(),
         });
         let task = tokio::spawn(accept_loop(listener, receiver, acceptor, context));
@@ -358,6 +358,7 @@ struct ConnectionContext {
     pairing: Option<Arc<PairingManager>>,
     sessions: Arc<SessionManager>,
     outbound: broadcast::Sender<Vec<u8>>,
+    auto_sync: Arc<AtomicBool>,
     fingerprint: String,
 }
 
@@ -553,6 +554,22 @@ async fn serve_connection(
                     )
                 }
             },
+            Body::SessionStart { .. } => match device.as_deref() {
+                None => {
+                    context.sink.record("auth-required");
+                    (Some(error_frame(ErrorCode::AuthFailed)), true)
+                }
+                Some(_) => match arm_auto(&context.sessions, &context.auto_sync, &context.outbound)
+                {
+                    Ok(_) => (None, false),
+                    Err(code) => {
+                        context
+                            .sink
+                            .record(&format!("auto-arm-refused code={code:?}"));
+                        (Some(error_frame(code)), false)
+                    }
+                },
+            },
             Body::SessionStop { reason, .. } => {
                 if device.is_none() {
                     (Some(error_frame(ErrorCode::AuthFailed)), true)
@@ -602,6 +619,46 @@ async fn serve_connection(
                 .record("session-stopped reason=peer-disconnected");
         }
     }
+}
+
+/// Arms a session at whatever window is in front right now.
+///
+/// This is the "no click on the PC" path: the phone starts a session when the user begins
+/// typing, and the local focus choice is whatever window they selected with the mouse. The
+/// VoiceBridge window itself is refused, so a forgotten target cannot swallow the text.
+fn arm_auto(
+    sessions: &SessionManager,
+    auto_sync: &AtomicBool,
+    outbound: &broadcast::Sender<Vec<u8>>,
+) -> Result<SessionInfo, ErrorCode> {
+    if !auto_sync.load(Ordering::Relaxed) {
+        return Err(ErrorCode::SessionNotActive);
+    }
+    // Re-use a live session, but start over after a pause or an error: the user asked to
+    // type again and the target has to be recaptured.
+    if let Some(info) = sessions.info() {
+        if info.state == "armed" || info.state == "active" {
+            return Ok(info);
+        }
+        sessions.stop();
+    }
+    let Some(target) = sessions.foreground() else {
+        return Err(ErrorCode::TargetUnavailable);
+    };
+    if target.process_id == std::process::id() {
+        return Err(ErrorCode::TargetUnavailable);
+    }
+    let info = sessions.start(target);
+    if let Some(frame) = encode_body(Body::SessionStart {
+        session_id: info.session_id.clone(),
+        target: Target {
+            window_label: info.target_label.clone(),
+            focus_policy: FocusPolicy::PauseOnFocusChange,
+        },
+    }) {
+        let _ = outbound.send(frame);
+    }
+    Ok(info)
 }
 
 async fn pairing_reply(
@@ -769,6 +826,7 @@ fn describe(code: ErrorCode) -> &'static str {
         ErrorCode::UnsupportedProtocol => "不支持的协议版本",
         ErrorCode::SessionNotActive => "当前没有可由该设备使用的输入会话",
         ErrorCode::RateLimited => "配对请求过于频繁或已有配对正在进行",
+        ErrorCode::TargetUnavailable => "请先在电脑上点选要输入的位置",
         _ => "消息无效",
     }
 }

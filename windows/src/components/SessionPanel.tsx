@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   describeSessionState,
+  getAutoSync,
   getInputSession,
-  startInputSession,
+  setAutoSync,
   stopInputSession,
   type InputSession,
 } from "../api/session";
@@ -17,17 +18,24 @@ function describe(cause: unknown): string {
 }
 
 /**
- * Starts and stops the single input session. Starting waits three seconds so the
- * user can move focus from this window to the field they actually want filled.
+ * Input sessions are armed by the phone, not by a button here: the user picks the
+ * target with the mouse, then starts typing on the phone. This panel only reports
+ * the state and offers an emergency stop plus a switch for the whole feature.
  */
 export function SessionPanel() {
   const [session, setSession] = useState<InputSession | null>(null);
+  const [autoEnabled, setAutoEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setSession(await getInputSession());
+      const [next, enabled] = await Promise.all([
+        getInputSession(),
+        getAutoSync(),
+      ]);
+      setSession(next);
+      setAutoEnabled(enabled);
     } catch {
       // The backend may still be starting; the next poll retries.
     }
@@ -39,11 +47,13 @@ export function SessionPanel() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const start = async () => {
+  const toggleAuto = async () => {
     setBusy(true);
     setError(null);
     try {
-      setSession(await startInputSession());
+      const enabled = await setAutoSync(!(autoEnabled ?? true));
+      setAutoEnabled(enabled);
+      if (!enabled) setSession(null);
     } catch (cause) {
       setError(describe(cause));
     } finally {
@@ -68,14 +78,25 @@ export function SessionPanel() {
     <section aria-label="输入会话">
       <h2>输入会话</h2>
       <p className="hint">
-        点击「开始输入会话」后有 3
-        秒时间切换到要输入的位置；之后手机上的文字会写进那个窗口。
-        焦点一旦改变，本次会话立即暂停，需要重新开始。
+        在电脑上点好要输入的地方，然后在手机上开始打字或语音输入，文字会自动写到那个窗口。
+        电脑端不需要点「开始」。焦点一旦切走，本次会话立即暂停，等你回到目标窗口重新输入时再自动开始。
       </p>
       <dl className="facts">
         <div>
+          <dt>自动同步</dt>
+          <dd>
+            {autoEnabled === null
+              ? "读取中…"
+              : autoEnabled
+                ? "已开启"
+                : "已关闭"}
+          </dd>
+        </div>
+        <div>
           <dt>状态</dt>
-          <dd>{session ? describeSessionState(session.state) : "未开始"}</dd>
+          <dd>
+            {session ? describeSessionState(session.state) : "等待手机输入"}
+          </dd>
         </div>
         <div>
           <dt>目标窗口</dt>
@@ -90,17 +111,17 @@ export function SessionPanel() {
       <div className="actions">
         <button
           type="button"
-          onClick={start}
-          disabled={busy || session !== null}
+          onClick={toggleAuto}
+          disabled={busy || autoEnabled === null}
         >
-          开始输入会话
+          {autoEnabled ? "关闭自动同步" : "开启自动同步"}
         </button>
         <button
           type="button"
           onClick={stop}
           disabled={busy || session === null}
         >
-          停止输入会话
+          停止当前会话
         </button>
       </div>
     </section>
