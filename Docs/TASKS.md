@@ -181,12 +181,12 @@
 - SHA-256、包名、递增版本、APK 签名校验；下载限 100 MiB，清单限 16 KiB。异步任务随 ViewModel 清理取消。
 - Actions 使用固定签名与 run_number 版本号，main 双端检查通过后发布测试 APK 和 update.json；PR 不发布、不访问密钥。
 - `scripts/setup-android-signing.ps1` 一次性生成并配置四个签名 Secrets；不生成本地构建。用户已执行成功，已通过 `gh secret list` 确认四项名称存在（不读取密钥值）。
-- 更新清单正常数据、非法 URL、版本、大小和摘要校验已添加 JUnit 测试，等待 CI。
+- 更新清单正常数据、非法 URL、版本、大小和摘要校验 JUnit 测试已在 CI 40457483697 执行：debug/release 各 3 项，均通过。
 - 已验证（不编译）：actionlint 检查更新后的 workflow 通过，嵌入 Python 语法、签名脚本 PowerShell 语法、Android XML、根文档链接和 `git diff --check` 通过。
 - 已通过 GitHub 只读 API 确认 `czczccc/VoiceBridge` 为公开仓库；用户已安装并登录 GitHub CLI，签名初始化和 Secrets 上传完成。
 
 待用户真机验收：
-- [ ] 首次固定签名 APK 安装与启动；可显示版本、检查更新。
+- [x] 首次固定签名 APK 安装与启动；可显示版本、检查更新。用户于 2026-10-27 提供手机截图：欢迎页正常、版本 0.1.0-test.2，显示“暂未发现新版本”。手机型号和 Android 版本未提供；截图不证明下载或覆盖安装成功。
 - [ ] 发布更高版本后 App 检出，下载并覆盖安装，应用数据保留。
 - [ ] 拒绝未知来源权限、取消安装后可返回重试。
 - [ ] GitHub 不可达时显示更新失败，现有应用仍可使用。
@@ -194,7 +194,7 @@
 
 ## TASK-000 实施与验证记录
 
-状态：两端 CI 构建与检查通过，测试包已发布；等待用户真机安装与欢迎页启动验证，未进入 TASK-001。
+状态：TASK-000 已完成。两端 CI 构建与检查通过；用户于 2026-10-27 分别提供 Android 和 Windows 安装后欢迎页截图，双端启动已确认。未进入 TASK-001。
 
 已实现：
 - 保留 `Docs/` 为文档目录，根 `README.md` 提供导航、依赖和构建命令，根 `CLAUDE.md` 指向完整项目约束。
@@ -214,7 +214,7 @@
 - 首轮 CI 的 Android SDK 初始化失败（默认安装已下架 tools 包），已明确使用 platform-tools；第二轮 CI 40457483697 全部成功。
 - 已验证：Android debug/release 构建、Lint、各 3 个 JUnit 测试（零失败）；Windows 前端类型/格式、Rustfmt、Tauri release + NSIS、Clippy、cargo test 命令成功（Rust 尚无业务测试）。
 - 已发布 Android 固定签名 0.1.0-test.2（VoiceBridge-2.apk），CI 产物 SHA-256 与大小匹配更新清单；Releases 上传成功。
-- 两端页面尚无真实设备上的启动验证，尚无业务单元测试；无测试不能视为业务验收通过。
+- Android 和 Windows 安装后欢迎页均已由用户截图确认。应用内下载和覆盖安装待后续版本真机测试，尚无输入同步业务测试。
 - Windows 安装程序暂未代码签名；Android 固定签名 Secrets 已用于成功构建和发布。构建附件和 Releases 均用于开发验证。
 - 当前运行存在 Actions Node 20 / setup-java v4 迁移提示，以及 gradlew 可执行位提示（Action 自动处理）；不影响本次构建结果，后续维护处理。
 
@@ -224,7 +224,7 @@
 
 ## 当前状态
 
-- [ ] TASK-000 仓库与构建基线（双端 CI 已通过并发布，等待用户设备启动验证）
+- [x] TASK-000 仓库与构建基线（双端 CI 已通过，Android 和 Windows 实际安装启动已由用户截图确认）
 - [ ] TASK-001 协议模型
 - [ ] TASK-002 Windows 服务与 UI
 - [ ] TASK-003 配对与安全连接
