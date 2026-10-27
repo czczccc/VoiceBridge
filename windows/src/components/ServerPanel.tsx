@@ -1,5 +1,12 @@
 import { useServer } from "../state/useServer";
 
+/** `SHA256:abcd…` becomes `SHA256:ab:cd:…` so it is easy to compare with the phone. */
+function formatFingerprint(value: string): string {
+  const [prefix, hex] = value.split(":");
+  if (!hex) return value;
+  return `${prefix}:${hex.match(/.{1,2}/g)?.join(":") ?? hex}`;
+}
+
 export function ServerPanel() {
   const { status, busy, error, refresh, startLocal, startLan, stop } =
     useServer();
@@ -22,6 +29,16 @@ export function ServerPanel() {
         <div>
           <dt>局域网访问</dt>
           <dd>未开放（需先完成设备配对与加密认证）</dd>
+        </div>
+        <div>
+          <dt>证书指纹</dt>
+          <dd>
+            {status?.fingerprint ? (
+              <code>{formatFingerprint(status.fingerprint)}</code>
+            ) : (
+              "生成中…"
+            )}
+          </dd>
         </div>
       </dl>
       {!running && status ? (

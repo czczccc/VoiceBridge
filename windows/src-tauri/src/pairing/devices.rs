@@ -29,6 +29,14 @@ pub struct DeviceStore {
 }
 
 impl DeviceStore {
+    /// Starts from an empty authorization list without touching disk.
+    pub fn empty(path: PathBuf) -> Self {
+        Self {
+            path,
+            devices: Vec::new(),
+        }
+    }
+
     /// Missing file means "no devices yet"; malformed JSON is an error so a
     /// damaged file is never silently treated as an empty authorization list.
     pub fn load(path: PathBuf) -> io::Result<Self> {

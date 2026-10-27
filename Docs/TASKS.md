@@ -249,6 +249,29 @@
 - 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
 - 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
+## TASK-003b 实施与验证记录（传输与凭据）
+
+状态：003b-1 已通过 CI 40469582420（Windows 30 项 Rust 测试、Clippy、NSIS；Android 10 项测试；发布 test.16）。003b-2 与 Android 配对客户端已写完，**待下一次 CI 验证**。
+
+已实现并由 CI 验证（003b-1）：
+- `identity.rs`：首次启动用 rcgen 生成自签名证书（SAN `voicebridge.local` / `localhost`），只以 DER 持久化，暴露 `SHA256:` 指纹；半写状态报 `Corrupt` 而不是悄悄轮换身份（否则已配对设备全部失效）。
+- `pairing/mod.rs`：SAS 6 位码（与独立实现的向量 `873723` 交叉验证）、32 字节随机 nonce/token（无填充 base64url）、token 的 SHA-256。
+- `pairing/devices.rs`：设备列表 JSON，只存 token 哈希，常量时间比较，支持撤销与 `last_seen`，原子写入；损坏文件报错而非当成空名单。
+- 新增依赖 `rcgen`、`rustls(ring)`、`sha2`、`base64`、`rand`、`subtle`，`Cargo.lock` 已更新并通过 `--locked` 构建。
+
+已完成代码，待 CI（003b-2 + Android）：
+- `server/tls.rs`：rustls ring 提供者 + 自签名证书的 WSS acceptor，无明文模式。
+- `server/mod.rs` 重写：TLS 握手、持久连接（不再一帧即断）、`hello` token 认证、认证前只允许 `hello`、认证后业务消息返回 `SESSION_NOT_ACTIVE`、TLS/协议失败即断、连接数与帧上限保留。
+- `Status` 新增证书指纹；新增 Tauri 命令 `local_fingerprint`、`list_devices`、`revoke_device`；IPC 只暴露 `DeviceSummary`，不包含 token 哈希。
+- Android：`PairingCode`（SAS/指纹/nonce）、`PairingSession`（校验指纹一致、TTL、`paired` 必须带 token、终态幂等）、`CredentialStore`（Keystore AES-GCM，失败关闭）、`PinnedTrust`（OkHttp 自定义 X509 指纹 pinning），新增 17 项 JVM 测试。
+
+未验证 / 风险：
+- 003b-2 与 Android 代码尚未经过 CI；配对 UI、mDNS 发现、LAN 监听仍未开放（TASK-003c）。
+- 服务端尚未分派 session/clipboard 消息；认证后的业务消息一律 `SESSION_NOT_ACTIVE`。
+- 空闲超时由 15 s 调整为 120 s，给用户核对配对码留时间；接入心跳后重新评估。
+- `pair.request` 目前仍返回 `AUTH_FAILED`，配对流程会在 003c 接入服务端。
+- Android 端尚未接入 UI：Keystore 存储、配对状态机已可用但无入口。
+
 ## 用户追加：Android 测试版应用内更新（随 TASK-000 交付）
 
 用户明确要求追加此功能，优先解决真机测试每次手动寻找 APK 的问题；该追加不代表 TASK-001 至 TASK-012 已完成。
@@ -287,6 +310,7 @@
 
 待验证：
 - [ ] 首次安装带插件的版本（当前已安装的 0.1.0 无更新能力，需最后手动安装一次）。
+  - 2026-10-27 用户报告已完成一次应用内更新（未提供版本号截图），下载与安装路径视为用户口头确认；安装后版本号与设置保留待补充确认。
 - [ ] 发布更高版本后，界面内依次完成检查、下载、自动安装，版本号随之更新且本机设置保留。
 - [ ] 断网或 GitHub 不可达时显示失败提示，应用继续可用。
 - [ ] 签名不匹配或被篡改的更新包被拒绝安装。
