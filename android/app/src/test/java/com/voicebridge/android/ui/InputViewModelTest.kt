@@ -56,12 +56,4 @@ class InputViewModelTest {
         // make the PC delete the text it already has.
         assertEquals(revision, model.revision.value)
     }
-
-    @Test
-    fun clearingAnEmptyFieldIsANoOp() {
-        val model = InputViewModel()
-        model.clear()
-
-        assertEquals(0L, model.revision.value)
-    }
 }

@@ -133,11 +133,8 @@ impl SessionManager {
             None => active.bound_device = Some(device_id.to_string()),
             _ => {}
         }
-        // A paused or failed session is never resumed automatically.
-        if matches!(
-            active.state,
-            SessionState::PausedFocus | SessionState::Error
-        ) {
+        // An injection failure may have written part of the text, so that session stays dead.
+        if active.state == SessionState::Error {
             return AckStatus::PausedFocus;
         }
         if seq <= active.last_seq {
