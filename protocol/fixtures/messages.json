@@ -1,0 +1,10 @@
+[
+  {"v":1,"type":"hello","messageId":"m1","sentAt":1780000000000,"deviceId":"android-device-id","clientVersion":"0.1.0","auth":{"token":"fixture-only"}},
+  {"v":1,"type":"hello.ack","messageId":"m2","sentAt":1780000000000,"serverVersion":"0.1.0","connectionId":"connection-1","capabilities":["text.snapshot","clipboard.text"],"authenticated":true},
+  {"v":1,"type":"session.start","messageId":"m3","sentAt":1780000000000,"sessionId":"session-1","target":{"windowLabel":"Notepad","focusPolicy":"pause-on-focus-change"}},
+  {"v":1,"type":"text.snapshot","messageId":"m4","sentAt":1780000000000,"sessionId":"session-1","seq":42,"text":"你好😀\n","selection":{"start":4,"end":4},"composition":null},
+  {"v":1,"type":"text.ack","messageId":"m5","sentAt":1780000000000,"sessionId":"session-1","seq":42,"status":"applied","latencyMs":34},
+  {"v":1,"type":"session.stop","messageId":"m6","sentAt":1780000000000,"sessionId":"session-1","reason":"user"},
+  {"v":1,"type":"clipboard.text","messageId":"m7","sentAt":1780000000000,"eventId":"event-1","originDeviceId":"android-device-id","direction":"android-to-windows","text":"测试剪切板"},
+  {"v":1,"type":"error","messageId":"m8","sentAt":1780000000000,"code":"FOCUS_CHANGED","message":"输入焦点发生变化，已暂停同步"}
+]

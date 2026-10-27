@@ -1,0 +1,327 @@
+[
+  {
+    "name": "unsupported-version",
+    "message": {
+      "v": 2,
+      "type": "hello",
+      "messageId": "m1",
+      "sentAt": 1780000000000,
+      "deviceId": "android-device-id",
+      "clientVersion": "0.1.0",
+      "auth": {
+        "token": "fixture-only"
+      }
+    },
+    "error": "UNSUPPORTED_PROTOCOL"
+  },
+  {
+    "name": "unknown-type",
+    "message": {
+      "v": 1,
+      "type": "unknown",
+      "messageId": "m1",
+      "sentAt": 1780000000000,
+      "deviceId": "android-device-id",
+      "clientVersion": "0.1.0",
+      "auth": {
+        "token": "fixture-only"
+      }
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "quoted-timestamp",
+    "message": {
+      "v": 1,
+      "type": "hello",
+      "messageId": "m1",
+      "sentAt": "123",
+      "deviceId": "android-device-id",
+      "clientVersion": "0.1.0",
+      "auth": {
+        "token": "fixture-only"
+      }
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "fractional-sequence",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 1.5,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "zero-sequence",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 0,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "negative-sequence",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": -1,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "quoted-sequence",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": "42",
+      "text": "你好😀\n",
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "oversized-sequence",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 9007199254740992,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "split-surrogate",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 42,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 3,
+        "end": 3
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "out-of-bounds-selection",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 42,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 6,
+        "end": 6
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "reversed-composition",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 42,
+      "text": "你好😀\n",
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": {
+        "start": 4,
+        "end": 2
+      }
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "wrong-focus-policy",
+    "message": {
+      "v": 1,
+      "type": "session.start",
+      "messageId": "m3",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "target": {
+        "windowLabel": "Notepad",
+        "focusPolicy": "follow-focus"
+      }
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "missing-token",
+    "message": {
+      "v": 1,
+      "type": "hello",
+      "messageId": "m1",
+      "sentAt": 1780000000000,
+      "deviceId": "android-device-id",
+      "clientVersion": "0.1.0",
+      "auth": {}
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "invalid-ack-status",
+    "message": {
+      "v": 1,
+      "type": "text.ack",
+      "messageId": "m5",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 42,
+      "status": "success",
+      "latencyMs": 34
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "invalid-direction",
+    "message": {
+      "v": 1,
+      "type": "clipboard.text",
+      "messageId": "m7",
+      "sentAt": 1780000000000,
+      "eventId": "event-1",
+      "originDeviceId": "android-device-id",
+      "direction": "both",
+      "text": "测试剪切板"
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "unknown-error-code",
+    "message": {
+      "v": 1,
+      "type": "error",
+      "messageId": "m8",
+      "sentAt": 1780000000000,
+      "code": "UNKNOWN",
+      "message": "输入焦点发生变化，已暂停同步"
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "blank-message-id",
+    "message": {
+      "v": 1,
+      "type": "hello",
+      "messageId": "",
+      "sentAt": 1780000000000,
+      "deviceId": "android-device-id",
+      "clientVersion": "0.1.0",
+      "auth": {
+        "token": "fixture-only"
+      }
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "numeric-text",
+    "message": {
+      "v": 1,
+      "type": "text.snapshot",
+      "messageId": "m4",
+      "sentAt": 1780000000000,
+      "sessionId": "session-1",
+      "seq": 42,
+      "text": 123,
+      "selection": {
+        "start": 4,
+        "end": 4
+      },
+      "composition": null
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "numeric-token",
+    "message": {
+      "v": 1,
+      "type": "hello",
+      "messageId": "m1",
+      "sentAt": 1780000000000,
+      "deviceId": "android-device-id",
+      "clientVersion": "0.1.0",
+      "auth": {
+        "token": 123
+      }
+    },
+    "error": "INVALID_MESSAGE"
+  },
+  {
+    "name": "quoted-boolean",
+    "message": {
+      "v": 1,
+      "type": "hello.ack",
+      "messageId": "m2",
+      "sentAt": 1780000000000,
+      "serverVersion": "0.1.0",
+      "connectionId": "connection-1",
+      "capabilities": [
+        "text.snapshot",
+        "clipboard.text"
+      ],
+      "authenticated": "true"
+    },
+    "error": "INVALID_MESSAGE"
+  }
+]

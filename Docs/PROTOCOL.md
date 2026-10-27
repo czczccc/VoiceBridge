@@ -6,7 +6,11 @@
 - 编码：UTF-8 JSON。
 - 协议版本：`1`。
 - 每条消息包含 `v`、`type`、`messageId`、`sentAt`。
-- 任何消息均有长度上限；初始限制 256 KiB，文件传输另行设计。
+- 任何消息均有长度上限：单条完整 UTF-8 JSON（包含字段名、转义和空白）最多 262144 字节（256 KiB），收发均校验；文本和剪切板共用此限制，文件传输另行设计。
+- 必需字段不能缺失或为 null；字段类型严格校验，不将字符串转换为数字或布尔值。整数使用 JSON 非负整数写法（不接受小数、指数形式或引号），最大 9007199254740991；seq 最小 1，sentAt 和 latencyMs 最小 0。
+- messageId、sessionId、deviceId、connectionId、eventId、originDeviceId 为非空标识符（UTF-8 最多 256 字节），不强制 UUID 格式；版本名称、windowLabel、reason 和 capability 同样非空且最多 256 字节。token 非空且最多 4096 字节，error.message 非空且最多 1024 字节；capabilities 最多 32 项。
+- 未知消息类型、未知枚举值、无效 UTF-8、结构不符一律 INVALID_MESSAGE。完整帧超限优先 MESSAGE_TOO_LARGE；可解析的非负整数版本不是 1 时优先 UNSUPPORTED_PROTOCOL。
+- 消息模型不自动生成包含正文或令牌的调试表示；解码失败只提供静态错误码。
 - 消息中的文本只用于内存处理；不得默认持久化正文。
 
 ## 2. 设备身份与配对
@@ -40,7 +44,19 @@ Android 扫码后验证证书指纹，再用一次性 nonce 完成配对。长�
 }
 ```
 
-服务器响应 `hello.ack`，包含 `serverVersion`、`connectionId`、能力列表与认证状态。认证失败后关闭连接。
+服务器响应 `hello.ack`，认证失败后关闭连接。以下字段均必需，authenticated 必须为布尔值：
+```json
+{
+  "v": 1,
+  "type": "hello.ack",
+  "messageId": "uuid",
+  "sentAt": 1780000000000,
+  "serverVersion": "0.1.0",
+  "connectionId": "connection-1",
+  "capabilities": ["text.snapshot", "clipboard.text"],
+  "authenticated": true
+}
+```
 
 ### 3.2 `session.start`
 
@@ -74,8 +90,8 @@ Android 文本状态变化：
   "seq": 42,
   "text": "我想开发一个局域网语音输入工具",
   "selection": {
-    "start": 18,
-    "end": 18
+    "start": 15,
+    "end": 15
   },
   "composition": null
 }
@@ -85,7 +101,9 @@ Android 文本状态变化：
 - `seq` 在同一 session 内严格递增。
 - Windows 只接受当前 session 且 `seq` 大于已应用序号的快照。
 - `text` 是当前完整文本状态，而非增量。
-- selection/composition 是可选字段；接收端不得假定所有 IME 都提供。
+- selection/composition 是可选字段，允许缺失或 null；接收端不得假定所有 IME 都提供。
+- 范围的 start/end 均为必需的非负整数，单位为 UTF-16 code unit，范围为 0..文本 UTF-16 长度（含端点）；不能落在代理对中间。selection 允许反向选区（start > end）；composition 要求 start <= end。
+- 空文本有效，用于清空会话文本。seq 的结构检查不代替运行时会话和已应用序号检查；后者在后续会话管理任务实现。
 - 如文本超过上限，返回错误，不静默截断。
 
 响应 `text.ack`：
@@ -195,3 +213,10 @@ Android 文本状态变化：
 - 不认识的必需字段或协议主版本必须拒绝。
 - 可选字段允许忽略。
 - 协议变化时增加测试样例，更新此文档与实现。
+
+## 7. 共享测试样例与实现边界
+
+- `protocol/fixtures/messages.json`：8 类消息的正常样例（含 hello.ack），Kotlin 与 Rust 共用；样例中的 token 为虚构值。
+- `protocol/fixtures/invalid.json`：跨端共用的非法字段、版本、序号、枚举和 UTF-16 边界样例及预期错误码。
+- 两端另测所有必需字段缺失/null、完整帧大小边界、UTF-8 字节限制、往返编解码、未知可选字段、空文本。
+- TASK-001 仅定义 Idle/Armed/Active/PausedFocus/Stopping/Error 及 Android 连接状态，不执行状态转换，不实现认证、传输、旧序号去重或注入。认证状态不由解析 hello 或 hello.ack 自动建立。
