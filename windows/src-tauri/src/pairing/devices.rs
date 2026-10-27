@@ -215,7 +215,9 @@ mod tests {
         let path = temporary_path_for_store();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not json").unwrap();
-        let error = DeviceStore::load(path.clone()).unwrap_err();
+        let error = DeviceStore::load(path.clone())
+            .err()
+            .expect("damaged store must fail");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
