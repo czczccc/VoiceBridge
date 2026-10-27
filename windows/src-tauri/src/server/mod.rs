@@ -81,12 +81,11 @@ impl Server {
             );
         }
 
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, DEFAULT_PORT))
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, self.port))
             .await
             .map_err(|error| {
-                self.sink
-                    .record(&format!("bind-failed port={DEFAULT_PORT}"));
-                format!("无法监听本机端口 {DEFAULT_PORT}（{}）", error.kind())
+                self.sink.record(&format!("bind-failed port={}", self.port));
+                format!("无法监听本机端口（{}）", error.kind())
             })?;
         let addr = listener
             .local_addr()

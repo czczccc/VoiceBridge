@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use super::log::MemorySink;
-use super::{reply_for, Server, DEFAULT_PORT, MAX_CONNECTIONS};
+use super::{reply_for, Server, MAX_CONNECTIONS};
 use crate::protocol::{self, Body, ErrorCode, Message};
 
 fn text_snapshot(text: &str) -> Vec<u8> {
@@ -73,7 +73,7 @@ async fn assert_closed(socket: &mut Socket) {
 }
 
 async fn running_server(sink: Arc<MemorySink>) -> (Server, String) {
-    let server = Server::new(sink);
+    let server = Server::with_port(sink, 0);
     let status = server.start(false).await.unwrap();
     let address = format!(
         "{}:{}",
@@ -152,12 +152,12 @@ async fn unauthorized_frames_are_refused_without_logging_bodies() {
 #[tokio::test]
 async fn stopping_releases_the_port_and_is_idempotent() {
     let sink = Arc::new(MemorySink::default());
-    let server = Server::new(sink.clone());
+    let server = Server::with_port(sink.clone(), 0);
     assert_eq!(server.status().await, super::Status::stopped());
 
     let running = server.start(false).await.unwrap();
     assert!(running.running);
-    assert_eq!(running.port, Some(DEFAULT_PORT));
+    assert!(running.port.unwrap() > 0);
     assert_eq!(running.address.as_deref(), Some("127.0.0.1"));
     // Starting twice must not create a second listener or move the address.
     assert_eq!(server.start(false).await.unwrap(), running);
@@ -166,7 +166,7 @@ async fn stopping_releases_the_port_and_is_idempotent() {
     assert_eq!(server.stop().await, super::Status::stopped());
 
     // Rebinding the same port proves the previous listener was dropped.
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", DEFAULT_PORT))
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", running.port.unwrap()))
         .await
         .expect("port released");
     drop(listener);
@@ -175,14 +175,10 @@ async fn stopping_releases_the_port_and_is_idempotent() {
 
 #[tokio::test]
 async fn lan_listening_stays_closed_until_authentication_exists() {
-    let server = Server::new(Arc::new(MemorySink::default()));
+    let server = Server::with_port(Arc::new(MemorySink::default()), 0);
     let error = server.start(true).await.unwrap_err();
     assert!(error.contains("配对"));
     assert!(!server.status().await.running);
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", DEFAULT_PORT))
-        .await
-        .expect("refused start leaves the port free");
-    drop(listener);
 }
 
 #[tokio::test]
