@@ -249,6 +249,23 @@
 - 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
 - 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
+## TASK-003c-2 实施与验证记录（mDNS 发现与 Android 配对界面）
+
+状态：Windows 的 mDNS 广播已由 CI 40475901092 验证；Android 客户端代码完成，**待下一次 CI 验证**。
+
+已实现：
+- Windows：`discovery.rs` 在开启局域网访问时注册 `_voicebridge._tcp.local.`，TXT 为 `v/id/name/fp`，停止或关闭局域网时注销；mDNS 失败只记日志，不阻断服务。
+- Android：`DiscoveryRecord` 严格解析 TXT（拒绝缺字段、非 `v=1`、非规范指纹、非法 UTF-8）；`Discovery` 用 `NsdManager` 浏览、串行解析、按设备去重、`SERVICE_LOST` 移除。
+- Android：`PairingClient` 用 `clientFor(fingerprint)` 建立 WSS，驱动既有 `PairingSession`，130 s 超时，结束即关闭 socket 与连接池。
+- Android：`PairingViewModel` + `PairingScreen` 提供发现列表、点击配对、「请在电脑上点允许」、成功/失败提示、重新配对，以及主机/端口/指纹的手动连接兜底。
+- `PairingSession` 的 `windowsDeviceId` 改为可空：发现路径仍严格比对；手输路径在已 pinning 的通道上采纳 challenge 里的真实 ID，并新增对应单测。
+
+未验证 / 风险：
+- Android 未编译、未运行；CI 结果未知。
+- 未在真机实测 mDNS 发现、Windows 防火墙放行与完整配对流程。
+- 部分路由器开启 AP 隔离时会屏蔽组播，此时只能用手动连接。
+- 配对成功后尚无输入同步：本阶段只验证「能安全连上」。
+
 ## TASK-003c-1 实施与验证记录（服务端配对与本地确认）
 
 状态：代码完成，待 CI 验证。用户在 2026-10-27 选择「本地确认」方案：自动发现 + Windows 弹窗允许，不强制核对 6 位码；配对码计算保留，留给后续高安全模式。

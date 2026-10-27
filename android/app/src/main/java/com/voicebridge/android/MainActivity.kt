@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.voicebridge.android.ui.PairingScreen
 import com.voicebridge.android.update.UpdatePanel
 
 class MainActivity : ComponentActivity() {
@@ -52,6 +53,7 @@ private fun WelcomeScreen() {
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(text = stringResource(R.string.baseline_message))
+            PairingScreen()
             UpdatePanel()
         }
     }

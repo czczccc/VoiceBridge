@@ -25,7 +25,7 @@ class PairingSessionTest {
 
     private fun session(
         observedFingerprint: String = SERVER_FINGERPRINT,
-        windowsDeviceId: String = SERVER_DEVICE_ID,
+        windowsDeviceId: String? = SERVER_DEVICE_ID,
     ) = PairingSession(
         windowsDeviceId = windowsDeviceId,
         observedFingerprint = observedFingerprint,
@@ -181,6 +181,25 @@ class PairingSessionTest {
         session.start()
         session.onMessage(challenge())
         assertTrue(session.state.value is PairingState.Failed)
+    }
+
+    @Test
+    fun unknownWindowsDeviceIdAdoptsTheChallengeDevice() {
+        // A hand-typed target has no advertised id; the pinned certificate is what authenticates it.
+        val session = session(windowsDeviceId = null)
+        session.start()
+        session.onMessage(challenge(serverDeviceId = "windows-typed-by-hand"))
+        assertTrue(session.state.value is PairingState.AwaitingCode)
+
+        session.confirm()
+        session.onMessage(
+            serverMessage(
+                Body.PairResult(PAIRING_ID, PairStatus.Paired, PAIRING_TOKEN, "windows-typed-by-hand", SERVER_NAME),
+            ),
+        )
+        val paired = session.state.value as PairingState.Paired
+        assertEquals("windows-typed-by-hand", paired.serverDeviceId)
+        assertEquals(PAIRING_TOKEN, paired.token)
     }
 
     @Test

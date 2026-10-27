@@ -46,7 +46,9 @@ sealed class PairingState {
  * once reached, further messages are ignored.
  */
 class PairingSession(
-    private val windowsDeviceId: String,
+    // The expected Windows device id; null when the target was typed by hand, so the id in its
+    // challenge is adopted. The pinned certificate already authenticated that peer.
+    windowsDeviceId: String?,
     private val observedFingerprint: String,
     private val deviceId: String,
     private val deviceName: String,
@@ -59,6 +61,7 @@ class PairingSession(
 
     private var clientNonce: String? = null
     private var pairingId: String? = null
+    private var expectedServerDeviceId: String? = windowsDeviceId
     private var challengeAccepted = false
     private var confirmSent = false
 
@@ -114,7 +117,12 @@ class PairingSession(
         }
         challengeAccepted = true
         pairingId = challenge.pairingId
-        if (challenge.serverDeviceId != windowsDeviceId) {
+        val expected = expectedServerDeviceId
+        if (expected == null) {
+            // A hand-typed target has no advertised id. The pinned certificate fingerprint already
+            // authenticated this peer, so the id in its challenge is adopted instead of compared.
+            expectedServerDeviceId = challenge.serverDeviceId
+        } else if (challenge.serverDeviceId != expected) {
             fail("配对挑战来自另一台设备，已中止配对。")
             return
         }

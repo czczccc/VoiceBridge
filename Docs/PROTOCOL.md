@@ -19,7 +19,7 @@
 Windows 生成本机证书与私钥并持久保存。配对流程：
 
 1. Windows 通过 mDNS 广播 `_voicebridge._tcp.local`，TXT 记录包含设备 ID、名称、端口、协议版本与证书 SHA-256 指纹。
-2. Android 用 `NsdManager` 浏览发现，用户点选目标电脑后建立 TLS 连接。
+2. Android 用 `NsdManager` 浏览发现，用户点选目标电脑后建立 TLS 连接。TXT 字段固定为 `v=1`、`id`、`name`、`fp`；端口取自 SRV，WebSocket 路径为 `/`。
 3. 两端按 3.7 的消息序列交换 nonce，并各自计算 6 位配对码；用户在两端核对一致后确认。
 4. Windows 发放长期 token，只保存其 SHA-256；Android 定位到 Keystore。
 
