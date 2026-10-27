@@ -212,7 +212,7 @@
 未验证 / 剩余风险：
 - 本机没有 Android SDK，Android APK、Lint 与单元测试任务须由 GitHub Actions 实际执行后确认。
 - 用户明确“本地编码、GitHub 构建、手机真机测试”后，已停止本地 Windows 构建、排队的 Rust 检查及 Android Gradle 配置检查进程；这些项目没有成功验证结果，等待 CI 执行。
-- 尚未提交或推送本轮改动，GitHub Actions 尚未运行；配置验证不代表云端构建成功。
+- 已提交推送并触发首轮 CI（40457294393）：Android SDK 初始化失败，setup-android 默认安装已下架 `tools` 包；改为明确安装 `platform-tools`，待新一轮 CI 验证。Windows 首轮仍在编译。配置验证不代表云端构建成功。
 - 两端页面尚无真实设备上的启动验证，尚无业务单元测试；无测试不能视为业务验收通过。
 - Windows 安装程序暂未代码签名；Android 固定签名 Secrets 已配置，首轮 CI 及测试版发布待验证。构建附件和 Releases 均用于开发验证。
 
