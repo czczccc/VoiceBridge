@@ -18,10 +18,4 @@ config.bundle.createUpdaterArtifacts = publish;
 if (!publish) config.plugins.updater.pubkey = "";
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 
-const cargoPath = "src-tauri/Cargo.toml";
-const cargo = fs
-  .readFileSync(cargoPath, "utf8")
-  .replace(/^version = "[^"]+"$/m, `version = "${version}"`);
-fs.writeFileSync(cargoPath, cargo);
-
 console.log(`build version ${version}, updater artifacts ${publish}`);
