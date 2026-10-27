@@ -144,6 +144,8 @@ Android 文本状态变化：
 
 停止后所有旧 session 的 `text.snapshot` 必须被拒绝。网络重连不自动复活旧 session。
 
+手机也会用 `session.stop`（`reason = "segment"`）结束「一段」：电脑保留已写入的文字，下一段由新的 `session.start` 开启、基线为空，因此追加而不是覆盖。
+
 ### 3.5 `clipboard.text`
 
 纯文本剪切板事件：

@@ -249,6 +249,21 @@
 - 当前单元测试数量：Android 10 项（协议 7 + 更新 3），Windows 14 项；TASK-002 记录中的「Android 12 项」为历史口径，与本轮无关。
 - 新协议未与任何网络层接线，`server` 仍对所有消息返回 `AUTH_FAILED`。
 
+## 用户追加：分段发送（发送后清空手机输入框）
+
+用户反馈：一段文字同步到电脑后，手机输入框仍保留原文，接着输入第二段会把第一段一起带上。改为按「段」发送：
+
+- 每次手机输入后停顿约 3 秒，视为本段结束：手机发送 `session.stop`（reason `segment`），电脑保留已写入的文字，手机输入框清空。
+- 下一段第一次输入时自动重新武装会话，新会话基线为空，因此新文字追加在电脑光标处，不会重写或删除上一段。
+- 手机保留「新一段」按钮，立即结束当前段，不必等 3 秒。
+- 清空只发生在手机端：`clearWithoutSync()` 不递增 revision，因此不会向电脑发送空快照（否则会删掉电脑上已有文字）。
+- 段内仍可正常退格修改，修改会以差异方式反映到电脑；只有跨段之后不能再回改上一段。
+- 电脑端报告焦点暂停（`paused-focus` 或 `injection-error`）时，手机**不会**自动清空输入框，草稿保留；焦点回到目标窗口后继续输入即可恢复。
+
+未验证 / 风险：
+- 未编译、未运行；真机未验证 3 秒自动分段是否与各输入法的延迟改写冲突。
+- 输入法在停顿后才提交整句修正时，该修正会成为新的一段并追加，而不是替换上一段；遇到此问题可调大自动分段时间或只用「新一段」按钮。
+
 ## 用户追加：无感自动开始输入会话
 
 用户要求电脑端不再需要点击「开始输入会话」：在电脑上点好输入框后，手机开始输入即自动同步；选择焦点属于用户在 Windows 上的操作，不由 VoiceBridge 完成。
@@ -276,7 +291,7 @@
 - 编码在发送锁内完成，保证 seq 与发送顺序一致；超限时返回错误码且不发送截断帧。
 
 已实现（TASK-006 Windows）：
-- `SessionManager` 状态机：`Armed → Active`，焦点变化或选区非空 → `PausedFocus` 并拒绝后续注入（须重新开始会话）；`stop` 立即清空。
+- `SessionManager` 状态机：`Armed → Active`；焦点变化 → `PausedFocus` 并拒绝注入，焦点回到同一目标窗口后自动恢复（不会追着新窗口写）；选区非空仍视为手动编辑而暂停；`stop` 立即清空。注入失败进入 `Error`，不自动恢复。
 - 启动会话时捕获前台窗口（后续按用户要求改为手机发起、无需电脑点击，见「无感自动开始输入会话」）。
 - 快照校验：sessionId、seq 严格递增、已绑定设备、焦点句柄一致；失败分别返回 `rejected-session` / `stale` / `paused-focus` / `injection-error`。
 - `TextInjectionBackend` trait + `SendInputBackend`（Unicode 键事件，换行转 Enter，回车符跳过），可注入假后端做测试。
@@ -297,7 +312,7 @@
 
 已实现：
 - `InputViewModel`：以 `TextFieldValue` 为唯一文本状态源，选择区与 composition 随状态一起保留；文本或选区变化时 `revision` 递增，供 TASK-005 生成快照。
-- `InputScreen`：多行 `OutlinedTextField`，进入页面后请求焦点并调用 `LocalSoftwareKeyboardController.show()`；系统拒绝时仍可手动点按输入框；提供「清空」。
+- `InputScreen`：多行 `OutlinedTextField`，进入页面后请求焦点并调用 `LocalSoftwareKeyboardController.show()`；系统拒绝时仍可手动点按输入框；提供「新一段」（原「清空」，按用户要求改为分段语义，见后续追加记录）。
 - 明文声明不录音、不调用 ASR、不点击第三方输入法麦克风（界面文案与代码注释）。
 - Manifest 增加 `windowSoftInputMode="adjustResize"`，并在根布局加 `imePadding()`，避免键盘遮挡输入框（行为待真机确认）。
 - 顺带修正配对页两处显示问题：已配对时不再重复出现第二行「已配对」；未配对且列表为空时才提示「未发现电脑」。

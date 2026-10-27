@@ -56,8 +56,8 @@ fun InputScreen(model: InputViewModel = viewModel(), sync: SyncViewModel = viewM
             text = stringResource(R.string.input_title),
             style = MaterialTheme.typography.titleMedium,
         )
-        OutlinedButton(onClick = model::clear, enabled = value.text.isNotEmpty()) {
-            Text(text = stringResource(R.string.input_clear))
+        OutlinedButton(onClick = sync::finishSegment, enabled = value.text.isNotEmpty()) {
+            Text(text = stringResource(R.string.input_new_segment))
         }
     }
     OutlinedTextField(
@@ -73,6 +73,10 @@ fun InputScreen(model: InputViewModel = viewModel(), sync: SyncViewModel = viewM
     )
     Text(
         text = stringResource(R.string.input_ime_note),
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Text(
+        text = stringResource(R.string.input_segment_note),
         style = MaterialTheme.typography.bodySmall,
     )
 }

@@ -87,6 +87,10 @@ class BridgeClient(
     private val _session = MutableStateFlow<BridgeSession?>(null)
     val session: StateFlow<BridgeSession?> = _session.asStateFlow()
 
+    /** True while the PC reports that its focus left the captured window. */
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused.asStateFlow()
+
     /** Guards [sequencer] and [socket]; OkHttp callbacks and the sender arrive on other threads. */
     private val lock = Any()
     private val sequencer = SnapshotSequencer()
@@ -173,6 +177,35 @@ class BridgeClient(
             sessionRequested = false
             Log.w(TAG, "A session request was dropped because the socket is closed")
         }
+    }
+
+    /**
+     * Ends the current segment: the PC keeps what it has, and the next text change arms a new
+     * session whose baseline is empty, so the next segment is appended instead of replacing.
+     */
+    fun endSession() {
+        val stopping = synchronized(lock) {
+            val active = sequencer.session ?: return
+            sequencer.clear()
+            pendingSnapshot = null
+            sessionRequested = false
+            active.sessionId to socket
+        }
+        val frame = try {
+            String(
+                Protocol.encode(
+                    message(Body.SessionStop(sessionId = stopping.first, reason = "segment")),
+                ),
+                Charsets.UTF_8,
+            )
+        } catch (error: ProtocolException) {
+            Log.w(TAG, "A session stop could not be encoded (${error.code})")
+            null
+        }
+        if (frame != null && stopping.second?.send(frame) != true) {
+            Log.w(TAG, "A session stop was dropped because the socket is closed")
+        }
+        publishSession(null)
     }
 
     /** Runs under [lock]. Returns the error to report, or null when nothing needs saying. */
@@ -290,6 +323,7 @@ class BridgeClient(
             sessionRequested = false
         }
         _session.value = null
+        _paused.value = false
     }
 
     private fun startSession(body: Body.SessionStart) {
@@ -301,7 +335,10 @@ class BridgeClient(
     }
 
     private fun endSession(sessionId: String) {
-        val cleared = synchronized(lock) { sequencer.stop(sessionId) }
+        val cleared = synchronized(lock) {
+            pendingSnapshot = null
+            sequencer.stop(sessionId)
+        }
         if (cleared) publishSession(null)
     }
 
@@ -338,6 +375,7 @@ class BridgeClient(
                 publish(BridgeConnectionState.Connected)
             }
             is Body.SessionStart -> {
+                _paused.value = false
                 startSession(body)
                 // The buffered text was waiting for exactly this session.
                 val buffered = synchronized(lock) {
@@ -372,10 +410,18 @@ class BridgeClient(
         when (ack.status) {
             // The PC dropped the session; snapshots for it would be rejected from now on.
             AckStatus.RejectedSession -> endSession(ack.sessionId)
-            // An applied snapshot proves the link works, so a local encoding error is over.
-            AckStatus.Applied -> publish(BridgeConnectionState.Connected)
-            // These describe the PC target (caret, focus, injection), not the link itself.
-            AckStatus.Stale, AckStatus.PausedFocus, AckStatus.InjectionError -> Unit
+            // The target is temporarily out of focus (or failed to accept input): keep the session
+            // and the draft, and let the PC tell us when it is writable again.
+            AckStatus.PausedFocus, AckStatus.InjectionError -> {
+                _paused.value = true
+                publish(BridgeConnectionState.Connected)
+            }
+            // An applied snapshot proves the link and the target work.
+            AckStatus.Applied -> {
+                _paused.value = false
+                publish(BridgeConnectionState.Connected)
+            }
+            AckStatus.Stale -> Unit
         }
     }
 

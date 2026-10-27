@@ -44,15 +44,17 @@ class InputViewModelTest {
     }
 
     @Test
-    fun clearEmptiesTheTextAndCountsAsAChange() {
+    fun clearingWithoutSyncKeepsTheRevisionSoNothingIsSent() {
         val model = InputViewModel()
-        model.onValueChange(TextFieldValue("要清空的文字", selection = TextRange(5)))
+        model.onValueChange(TextFieldValue("已经发送的一段", selection = TextRange(6)))
         val revision = model.revision.value
 
-        model.clear()
+        model.clearWithoutSync()
 
         assertEquals("", model.value.value.text)
-        assertEquals(revision + 1, model.revision.value)
+        // No revision bump means the sync layer never sees an empty snapshot that would
+        // make the PC delete the text it already has.
+        assertEquals(revision, model.revision.value)
     }
 
     @Test

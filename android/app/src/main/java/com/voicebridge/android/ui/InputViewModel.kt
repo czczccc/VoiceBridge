@@ -1,5 +1,6 @@
 package com.voicebridge.android.ui
 
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +27,12 @@ class InputViewModel : ViewModel() {
         _revision.value += 1
     }
 
-    fun clear() {
-        onValueChange(TextFieldValue(""))
+    /**
+     * Clears the field without announcing a change. A finished segment must not reach the PC as an
+     * empty snapshot, because that would delete everything already typed there.
+     */
+    fun clearWithoutSync() {
+        if (_value.value.text.isEmpty() && _value.value.selection == TextRange.Zero) return
+        _value.value = TextFieldValue("")
     }
 }

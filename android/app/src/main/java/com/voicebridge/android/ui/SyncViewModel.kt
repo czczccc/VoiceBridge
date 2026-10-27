@@ -22,6 +22,12 @@ import kotlinx.coroutines.launch
 private val SNAPSHOT_WINDOW_MILLIS = BuildConfig.SNAPSHOT_WINDOW_MS
 
 /**
+ * A pause this long means the segment is finished: the PC keeps the text and the field is cleared
+ * for the next one. Shorter than an IME's late rewrite, long enough not to interrupt dictation.
+ */
+private const val AUTO_COMMIT_MILLIS = 3_000L
+
+/**
  * Connects the paired PC to the text field.
  *
  * The text field stays owned by [InputViewModel]; this view model only observes it and forwards the
@@ -57,6 +63,8 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
 
     private var text: InputViewModel? = null
     private var textJob: Job? = null
+    private var autoCommit: Job? = null
+    private var segmentSent = false
 
     /** Starts (or stops, for null) the bridge for [credential]; an unchanged credential is a no-op. */
     fun useCredential(credential: StoredCredential?) {
@@ -87,7 +95,46 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
             model.revision.collect {
                 val current = model.value.value
                 gate.onText(current.text, current.protocolSelection())
+                segmentSent = true
+                scheduleAutoCommit()
             }
+        }
+    }
+
+    /**
+     * Ends the segment on purpose: the PC keeps what it already has, the field is cleared, and the
+     * next keystroke arms a fresh session so the next segment is appended after it.
+     */
+    fun finishSegment() {
+        autoCommit?.cancel()
+        autoCommit = null
+        if (!segmentSent) return
+        if (_session.value != null) {
+            // Deliver anything still inside the coalescing window before detaching, otherwise an
+            // edit made just before the tap exists nowhere.
+            gate.flush()
+            bridge?.endSession()
+            gate.reset()
+            _session.value = null
+        } else if (bridge != null) {
+            // Connected but the PC never armed a session (refused target or auto sync off):
+            // keeping the draft is safer than clearing text that was never delivered.
+            return
+        }
+        // With no bridge at all this is a purely local clear.
+        segmentSent = false
+        text?.clearWithoutSync()
+    }
+
+    /** A pause ends the segment automatically; the user does not have to press anything. */
+    private fun scheduleAutoCommit() {
+        autoCommit?.cancel()
+        autoCommit = viewModelScope.launch {
+            delay(AUTO_COMMIT_MILLIS)
+            autoCommit = null
+            // If the PC never armed a session (refused target, auto sync off) or is currently
+            // paused on another window, the text stays put: clearing it would lose the draft.
+            if (_session.value != null && bridge?.paused?.value != true) finishSegment()
         }
     }
 
@@ -98,12 +145,18 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        autoCommit?.cancel()
         detachInput()
         stopBridge()
     }
 
     private fun onSession(session: BridgeSession?) {
         _session.value = session
+        if (session == null) {
+            segmentSent = false
+            autoCommit?.cancel()
+            autoCommit = null
+        }
         // A session never resumes: the old numbering and the dedupe memory go with it, and the PC
         // needs the full text before the user's next keystroke.
         gate.reset()
@@ -114,6 +167,9 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun stopBridge() {
+        autoCommit?.cancel()
+        autoCommit = null
+        segmentSent = false
         bridgeScope?.cancel()
         bridgeScope = null
         bridge?.stop()

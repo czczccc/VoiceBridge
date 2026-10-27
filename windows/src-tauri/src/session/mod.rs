@@ -148,6 +148,8 @@ impl SessionManager {
             active.state = SessionState::PausedFocus;
             return AckStatus::PausedFocus;
         }
+        // Pausing is temporary: writing resumes only when the foreground window is the exact
+        // target again, so text is never redirected to whatever window took over.
         let Some(current) = self.focus.foreground() else {
             active.state = SessionState::PausedFocus;
             return AckStatus::PausedFocus;
@@ -365,14 +367,16 @@ mod tests {
             AckStatus::PausedFocus
         );
         assert_eq!(ops(&fixture), before);
-        // It stays paused even if focus returns: the user must restart the session.
+        // Returning to the captured window resumes the same session: the baseline is intact,
+        // so the pending text is applied instead of being appended twice.
         *fixture.focus.target.lock().unwrap() = Some(target(1));
         assert_eq!(
             fixture
                 .manager
                 .apply("android-1", &info.session_id, 2, "secret", None),
-            AckStatus::PausedFocus
+            AckStatus::Applied
         );
+        assert_eq!(ops(&fixture), vec!["backspace:0", "type:secret"]);
     }
 
     #[test]
