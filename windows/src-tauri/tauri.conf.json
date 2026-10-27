@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src \u0027self\u0027; style-src \u0027self\u0027; img-src \u0027self\u0027 asset: http://asset.localhost; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self'; img-src 'self' asset: http://asset.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -31,10 +31,10 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
       }
-    },
-    "nsis": {
-      "installMode": "currentUser"
     }
   },
   "plugins": {
