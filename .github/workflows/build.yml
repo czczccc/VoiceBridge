@@ -158,33 +158,7 @@ jobs:
       - name: Apply build version and update-channel settings
         env:
           PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
-        run: |
-          node - <<'JS'
-          const fs = require('fs');
-          const version = `0.1.1-test.${process.env.GITHUB_RUN_NUMBER}`;
-          const publish = process.env.PUBLISH === 'true';
-          const configPath = 'src-tauri/tauri.conf.json';
-          const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-          config.version = version;
-          config.bundle.createUpdaterArtifacts = publish;
-          if (!publish) config.plugins.updater.pubkey = '';
-          fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
-          const cargoPath = 'src-tauri/Cargo.toml';
-          const cargo = fs.readFileSync(cargoPath, 'utf8')
-            .replace(/^version = "[^"]+"$/m, `version = "${version}"`);
-          fs.writeFileSync(cargoPath, cargo);
-          if (publish && !config.plugins.updater.pubkey) {
-            console.error('::error::Updater public key missing. Run scripts/setup-windows-updater.ps1 once.');
-            process.exit(1);
-          }
-          console.log(`build version ${version}, updater artifacts ${publish}`);
-          JS
-      - name: Check frontend formatting and types
-        run: |
-          npm run format:check
-          npm run check
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        run: node scripts/apply-build-version.mjs
       - name: Build application and installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -203,34 +177,7 @@ jobs:
           retention-days: 14
       - name: Prepare Windows update channel files
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        run: |
-          node - <<'JS'
-          const fs = require('fs');
-          const path = require('path');
-          const bundle = 'src-tauri/target/release/bundle/nsis';
-          const setup = fs.readdirSync(bundle).find((name) => name.endsWith('-setup.exe'));
-          if (!setup) throw new Error('installer not found');
-          const signature = fs.readFileSync(path.join(bundle, `${setup}.sig`), 'utf8').trim();
-          const version = `0.1.1-test.${process.env.GITHUB_RUN_NUMBER}`;
-          const asset = `VoiceBridge-${process.env.GITHUB_RUN_NUMBER}-setup.exe`;
-          const output = 'update-release';
-          fs.mkdirSync(output, { recursive: true });
-          fs.copyFileSync(path.join(bundle, setup), path.join(output, asset));
-          fs.writeFileSync(`${path.join(output, asset)}.sig`, `${signature}\n`);
-          const manifest = {
-            version,
-            pub_date: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-            notes: `VoiceBridge 测试版本 ${version}`,
-            platforms: {
-              'windows-x86_64': {
-                signature,
-                url: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/windows-testing/${asset}`,
-              },
-            },
-          };
-          fs.writeFileSync(path.join(output, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-          console.log(`prepared ${asset} for ${version}`);
-          JS
+        run: node scripts/prepare-update-manifest.mjs
       - name: Upload update channel files
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
