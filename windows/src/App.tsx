@@ -15,7 +15,7 @@ export default function App() {
       <UpdatePanel />
       <section aria-label="功能状态">
         <h2>后续版本</h2>
-        <p>语音文本同步与剪切板功能将在后续版本提供。</p>
+        <p>双向纯文本剪切板、托盘与设置将在后续版本提供。</p>
       </section>
     </main>
   );

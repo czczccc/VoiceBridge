@@ -4,7 +4,7 @@ Android ↔ Windows 局域网语音文本与纯文本剪切板工具。
 
 语音识别由手机当前输入法完成。VoiceBridge 计划将 Android 文本框的变化同步到 Windows 用户确认的输入位置，并支持双向纯文本剪切板。
 
-**当前进行到 TASK-003（配对与安全连接）**：Windows 提供 WSS 服务、mDNS 广播与本地确认配对；Android 提供发现列表、证书指纹 pinning 与 Keystore 凭据存储。输入快照发送与 Windows 差异注入已实现（TASK-005~007，待真机验证）；剪切板尚未实现。实施顺序与实际验证结果见 [Docs/TASKS.md](Docs/TASKS.md)。
+**当前进度**：TASK-000 ~ TASK-007 的代码均已实现并通过 CI——Windows 提供 WSS 服务、mDNS 广播与本地确认配对，Android 提供发现列表、证书指纹 pinning 与 Keystore 凭据存储，输入快照发送与 Windows 差异注入已完成；用户已手动验证到 TASK-007 之前。下一步是 TASK-008 通知栏快捷入口；剪切板、托盘与设置尚未实现。实施顺序与实际验证结果见 [Docs/TASKS.md](Docs/TASKS.md)。
 
 ## 仓库结构
 
@@ -31,9 +31,8 @@ VoiceBridge/
 1. 将代码推送到 GitHub 的 `main` 分支，或创建 Pull Request；也可以在仓库 **Actions → Build apps → Run workflow** 手动触发。
 2. 等待 Android 与 Windows 构建检查完成。main 分支还会构建固定签名 APK，并在两端检查通过后发布到 [Android 测试版 Releases](https://github.com/czczccc/VoiceBridge/releases/tag/android-testing)。首次构建需下载依赖。
 3. 手机首次安装：从上述 Releases 下载 `VoiceBridge-数字.apk` 中版本号最大的包。后续打开 App 自动检查，点击下载和安装即可更新，不用再去 GitHub 查找。
-4. Windows 安装程序与诊断报告在运行页面底部 **Artifacts** 下载：
-   - `voicebridge-android-debug`：解压得到 `app-debug.apk`。
-   - `voicebridge-windows-x64`：解压得到 NSIS `*-setup.exe` 安装程序。
+4. Windows 首次安装：从 **Artifacts** 的 `voicebridge-windows-x64` 或 [Windows 测试版 Releases](https://github.com/czczccc/VoiceBridge/releases/tag/windows-testing) 下载并安装。之后打开应用，在「版本更新」点「检查更新」→「下载并安装」，更新在应用内完成，不用再手动下载。
+   - `voicebridge-android-debug`：解压得到 `app-debug.apk`，仅供诊断，日常手机测试请用 Releases 固定签名包。
    - `android-check-reports`：Android Lint 等检查报告；可用于排查失败。
 
 附件保留 14 天，Releases 测试包持续保留。仅发布任务持有仓库内容写权限，PR 不使用签名密钥、不发布。Windows 安装包暂未配置代码签名。CI 成功不代表真机启动、输入法兼容或端到端验收通过。`voicebridge-android-debug` 仅供诊断，签名与测试更新渠道不同；日常手机测试请安装 Releases 固定签名包。
@@ -61,7 +60,7 @@ VoiceBridge/
 | Android | Ubuntu 24.04、Temurin JDK 17、SDK 35 / Build Tools 35.0.0、Gradle Wrapper 8.11.1 | debug 构建/Lint/单元测试；main 增加固定签名 release 构建/Lint/单元测试 |
 | Windows x64 | Windows Server 2022、Node 22、Rust stable、MSVC、WebView2 | TypeScript / Prettier、Rustfmt / Clippy、`cargo test`、Tauri release + NSIS |
 
-依赖通过 `windows/package-lock.json` 与 `windows/src-tauri/Cargo.lock` 锁定。Android 插件和直接依赖使用固定版本，Gradle Wrapper JAR 与发行包均有 SHA-256 校验。Android 已添加更新清单验证的单元测试，等待 CI 执行；Rust 当前没有业务单元测试。
+依赖通过 `windows/package-lock.json` 与 `windows/src-tauri/Cargo.lock` 锁定。Android 插件和直接依赖使用固定版本，Gradle Wrapper JAR 与发行包均有 SHA-256 校验。Android 与 Rust 均已包含协议、配对、发现、会话与注入相关单元测试，由 CI 执行。
 
 ## 本地构建命令参考（默认使用 CI，不在本机执行）
 

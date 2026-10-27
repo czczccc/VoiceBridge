@@ -3,7 +3,7 @@
     <string name="app_name">VoiceBridge</string>
     <string name="tagline">手机输入，电脑接续。</string>
     <string name="welcome">欢迎使用</string>
-    <string name="baseline_message">应用已启动。语音文本同步与剪切板功能将在后续版本提供。</string>
+    <string name="baseline_message">应用已启动。语音输入同步已可用；剪切板功能将在后续版本提供。</string>
 
     <string name="input_title">语音输入</string>
     <string name="input_new_segment">新一段</string>
@@ -20,6 +20,18 @@
     <string name="sync_error_target">电脑上没有可输入的位置：请先在电脑上点选输入框（不要停在 VoiceBridge 窗口）</string>
     <string name="sync_error_pairing">配对已失效，请重新配对</string>
     <string name="sync_error_disabled">电脑端已关闭自动同步</string>
+
+    <string name="quick_entry_title">通知栏快捷入口</string>
+    <string name="quick_entry_notification_title">语音输入</string>
+    <string name="quick_entry_notification_text">点按打开手机输入框</string>
+    <string name="quick_entry_notification_action">打开输入</string>
+    <string name="quick_entry_channel">快捷入口</string>
+    <string name="quick_entry_channel_description">在通知栏点按即可打开语音输入框</string>
+    <string name="quick_entry_show">显示</string>
+    <string name="quick_entry_enable">开启</string>
+    <string name="quick_entry_settings">设置</string>
+    <string name="quick_entry_denied">未允许通知：通知栏入口不可用，输入与同步不受影响。可在系统设置中允许通知。</string>
+    <string name="quick_entry_settings_error">无法打开通知设置，请手动在系统设置中允许通知。</string>
 
     <string name="pairing_title">配对电脑</string>
     <string name="pairing_searching">正在搜索局域网内的电脑…</string>

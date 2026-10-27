@@ -23,23 +23,33 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.voicebridge.android.R
+import kotlinx.coroutines.delay
 
 /**
  * The text area voice input flows through. The app never records audio and never talks to an ASR
  * engine: the user taps the microphone of whichever IME they already use, and that IME writes into
  * this field, exactly like any other text box.
  *
- * Focus is requested when the screen appears, and the system IME is asked to show. Android may
- * refuse or delay that request, so the field remains tappable either way.
+ * Focus is requested when the screen appears, and again whenever [openInputRequests] changes (the
+ * notification shortcut). The system IME is asked to show each time. Android may refuse or delay
+ * that request, so the field remains tappable either way.
  */
 @Composable
-fun InputScreen(model: InputViewModel = viewModel(), sync: SyncViewModel = viewModel()) {
+fun InputScreen(
+    model: InputViewModel = viewModel(),
+    sync: SyncViewModel = viewModel(),
+    openInputRequests: Int = 0,
+) {
     val value by model.value.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(openInputRequests) {
         focusRequester.requestFocus()
+        // A notification tap can deliver onNewIntent just before the window regains focus, and an
+        // IME request made at that instant is dropped. The delay does not make this a background
+        // request: the activity is already coming to the front because the user tapped.
+        delay(150)
         keyboard?.show()
     }
     // The field is the only writer the snapshot layer listens to, so it also owns the attachment.
@@ -79,4 +89,5 @@ fun InputScreen(model: InputViewModel = viewModel(), sync: SyncViewModel = viewM
         text = stringResource(R.string.input_segment_note),
         style = MaterialTheme.typography.bodySmall,
     )
+    QuickEntryRow()
 }
