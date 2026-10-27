@@ -26,7 +26,7 @@ mod platform {
     use std::mem::size_of;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_RETURN,
+        KEYEVENTF_UNICODE, VIRTUAL_KEY,
     };
 
     /// Longest batch handed to one SendInput call.
@@ -55,21 +55,21 @@ mod platform {
         KEYBD_EVENT_FLAGS(KEYEVENTF_UNICODE.0 | KEYEVENTF_KEYUP.0)
     }
 
-    /// UTF-16 code units of `text`, one down/up pair each. `\n` becomes Enter; `\r` is
-    /// skipped because Enter already produces it.
+    /// UTF-16 code units of `text`, one down/up pair each.
+    ///
+    /// Line breaks become spaces, never Enter: remote text must not send a chat message or submit
+    /// a form, so pressing Enter on the PC stays the user's own decision. Mapping each UTF-16 unit
+    /// to exactly one typed character also keeps the diff's backspace count valid.
     fn events_for(text: &str) -> Vec<INPUT> {
         let mut events = Vec::with_capacity(text.len() * 2);
         for unit in text.encode_utf16() {
-            if unit == u16::from(b'\r') {
-                continue;
-            }
-            if unit == u16::from(b'\n') {
-                events.push(key(VK_RETURN, 0, KEYBD_EVENT_FLAGS(0)));
-                events.push(key(VK_RETURN, 0, key_up()));
+            let unit = if unit == u16::from(b'\r') || unit == u16::from(b'\n') {
+                u16::from(b' ')
             } else {
-                events.push(key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE));
-                events.push(key(VIRTUAL_KEY(0), unit, unicode_with_key_up()));
-            }
+                unit
+            };
+            events.push(key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE));
+            events.push(key(VIRTUAL_KEY(0), unit, unicode_with_key_up()));
         }
         events
     }
@@ -126,9 +126,16 @@ mod platform {
         }
 
         #[test]
-        fn newlines_become_enter_and_carriage_returns_are_skipped() {
+        fn line_breaks_become_spaces_and_never_enter() {
+            // Each unit still produces a down/up pair: one line feed is one space.
             assert_eq!(events_for("\n").len(), 2);
-            assert_eq!(events_for("\r\n").len(), 2);
+            // CRLF is two units, so two spaces; this keeps backspace accounting exact.
+            assert_eq!(events_for("\r\n").len(), 4);
+            assert_eq!(events_for("a\nb").len(), 6);
+            let all_unicode = events_for("a\r\nb\nc")
+                .iter()
+                .all(|event| unsafe { event.Anonymous.ki.wVk == VIRTUAL_KEY(0) });
+            assert!(all_unicode);
         }
 
         #[test]

@@ -283,11 +283,11 @@ code = SHA-256("voicebridge-sas-v1" ‖ 客户端实际观察到的服务器证�
 ## 5. 状态机
 
 ### Windows 输入会话
-`Idle → Armed → Active → PausedFocus → Active`（仅用户重新确认目标后）
+`Idle → Armed → Active → PausedFocus → Active`（焦点回到同一目标窗口后）
 `Active → Stopping → Idle`
 `Active → Error → Idle`
 
-- `Armed`：用户明确启动会话，已捕获目标窗口。
+- `Armed`：会话由手机发起，已捕获目标窗口。
 - `Active`：焦点校验通过，允许文本注入。
 - `PausedFocus`：焦点变化，停止所有注入。
 - `Stopping`：拒绝新快照，清理会话状态。

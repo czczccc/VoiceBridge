@@ -28,16 +28,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.voicebridge.android.R
 import com.voicebridge.android.discovery.DiscoveredComputer
 
 /**
  * Discovery list, the progress of the single pairing attempt and the manual fallback for a network
  * where DNS-SD does not work.
+ *
+ * The credential and the bridge are owned by the app shell, so this page can come and go without
+ * disconnecting the PC.
  */
 @Composable
-fun PairingScreen(viewModel: PairingViewModel = viewModel(), sync: SyncViewModel = viewModel()) {
+fun PairingScreen(viewModel: PairingViewModel, sync: SyncViewModel) {
     val computers by viewModel.computers.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val stored by viewModel.stored.collectAsStateWithLifecycle()
@@ -45,8 +47,6 @@ fun PairingScreen(viewModel: PairingViewModel = viewModel(), sync: SyncViewModel
     val session by sync.session.collectAsStateWithLifecycle()
     var manualEntryVisible by remember { mutableStateOf(false) }
 
-    // The credential lives here, so this is also where the bridge learns to start or stop.
-    LaunchedEffect(stored) { sync.useCredential(stored) }
     LaunchedEffect(Unit) { viewModel.startDiscovery() }
     DisposableEffect(Unit) {
         onDispose { viewModel.stopDiscovery() }

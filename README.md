@@ -4,7 +4,7 @@ Android ↔ Windows 局域网语音文本与纯文本剪切板工具。
 
 语音识别由手机当前输入法完成。VoiceBridge 计划将 Android 文本框的变化同步到 Windows 用户确认的输入位置，并支持双向纯文本剪切板。
 
-**当前进度**：TASK-000 ~ TASK-007 的代码均已实现并通过 CI——Windows 提供 WSS 服务、mDNS 广播与本地确认配对，Android 提供发现列表、证书指纹 pinning 与 Keystore 凭据存储，输入快照发送与 Windows 差异注入已完成；用户已手动验证到 TASK-007 之前。下一步是 TASK-008 通知栏快捷入口；剪切板、托盘与设置尚未实现。实施顺序与实际验证结果见 [Docs/TASKS.md](Docs/TASKS.md)。
+**当前进度**：TASK-000 ~ TASK-008 的代码均已实现并通过 CI（TASK-008 通知栏入口的真机验证待完成）；用户已手动验证到 TASK-007 之前。当前正在实现语音优先主界面和「远程换行不触发回车」，代码完成、待 CI 与真机验证；剪切板、托盘与设置尚未实现。实施顺序与实际验证结果见 [Docs/TASKS.md](Docs/TASKS.md)。
 
 ## 仓库结构
 
