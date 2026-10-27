@@ -63,7 +63,7 @@ impl Fixture {
     }
 
     /// TLS only, so the connection holds a slot without completing the WebSocket handshake.
-    async fn tls(&self, address: &str) -> TlsStream<TcpStream> {
+    async fn try_tls(&self, address: &str) -> std::io::Result<TlsStream<TcpStream>> {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let mut roots = rustls::RootCertStore::empty();
         roots
@@ -75,9 +75,12 @@ impl Fixture {
         let connector = TlsConnector::from(Arc::new(config));
         let name = ServerName::try_from("voicebridge.local").expect("server name");
         connector
-            .connect(name, TcpStream::connect(address).await.expect("tcp"))
+            .connect(name, TcpStream::connect(address).await?)
             .await
-            .expect("tls")
+    }
+
+    async fn tls(&self, address: &str) -> TlsStream<TcpStream> {
+        self.try_tls(address).await.expect("tls")
     }
 
     async fn connect(&self, address: &str) -> Client {
@@ -334,7 +337,7 @@ async fn connection_limit_is_enforced() {
     for _ in 0..MAX_CONNECTIONS {
         idle.push(fixture.tls(&address).await);
     }
-    let extra = tokio::time::timeout(Duration::from_secs(5), fixture.tls(&address))
+    let extra = tokio::time::timeout(Duration::from_secs(5), fixture.try_tls(&address))
         .await
         .expect("rejection is immediate");
     assert!(extra.is_err(), "connection beyond the cap was accepted");
