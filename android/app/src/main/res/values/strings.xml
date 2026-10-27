@@ -2,12 +2,26 @@
 <resources>
     <string name="app_name">VoiceBridge</string>
 
-    <string name="input_title">语音输入</string>
     <string name="input_new_segment">新一段</string>
     <string name="input_ime_note">录音与识别由你当前使用的输入法完成；VoiceBridge 不录音、不识别、也不点击输入法麦克风。</string>
 
     <string name="voice_settings">设置</string>
-    <string name="voice_unpaired">尚未配对电脑。配对后，这里说的话会直接进入电脑的输入框。</string>
+    <string name="voice_connections">连接</string>
+    <string name="voice_close">关闭</string>
+    <string name="voice_continue">继续说话</string>
+    <string name="voice_end_segment">结束本段</string>
+    <string name="voice_paired_to">电脑：%1$s</string>
+    <string name="voice_orb_idle">已连接电脑</string>
+    <string name="voice_orb_connecting">正在连接电脑</string>
+    <string name="voice_orb_active">正在同步</string>
+    <string name="voice_orb_error">连接出错</string>
+    <string name="voice_status_connected">已连接 %1$s</string>
+    <string name="voice_status_syncing">正在同步</string>
+    <string name="voice_status_connecting">正在连接…</string>
+    <string name="voice_status_reconnecting">正在重连（第 %1$d 次）…</string>
+    <string name="voice_status_disconnected">未连接</string>
+    <string name="voice_status_unpaired">未配对</string>
+    <string name="voice_unpaired">尚未配对电脑，配对后文字会进入电脑输入框。</string>
     <string name="voice_pair_action">去配对</string>
     <string name="voice_hint">按微信键盘上的麦克风说话</string>
     <string name="voice_continue_hint">点一下输入框继续说话</string>
